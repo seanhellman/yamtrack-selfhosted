@@ -13,7 +13,11 @@ Built to migrate off TV Time, which shut down 2026-07-15.
 ## Deployment phases
 
 - **Phase 2 (current):** hosted on this Mac, LAN-only, machine kept awake. No remote/internet access.
-- **Phase 3 (deferred):** copy `docker-compose.yml` + `db/` to a refurb mini-PC once one is acquired (holding off on new hardware — RAM prices make it overpriced right now). Add Tailscale for remote access at that point. No VPS — LAN/Tailscale only, by design.
+- **Phase 3 (next, active plan):** move to Oracle Cloud's "Always Free" tier — a permanently free ARM VM (`VM.Standard.A1.Flex`, 2 OCPU/12 GB as of the June 2026 limit reduction), reached exclusively via Tailscale (no public inbound ports opened, same security posture as LAN-only). Both `ghcr.io/fuzzygrim/yamtrack:0.25.3` and `redis:8-alpine` are confirmed multi-arch (`linux/amd64` + `linux/arm64` — checked via `docker manifest inspect`), so `docker-compose.yml` runs there unmodified; no image or compose changes needed for the architecture switch itself.
+  - Convert the Oracle account to Pay-As-You-Go billing after signup (still $0 as long as usage stays within Always Free limits). This is required, not optional — it's what exempts the instance from Oracle's idle-instance auto-reclamation (instances idle >7 days at <20% CPU/network/memory get reclaimed), which a low-traffic personal app would likely trigger otherwise.
+  - Pick a home region with reliable A1 capacity at signup — e.g. `us-ashburn-1` or `us-phoenix-1`. Can't be changed later; busy regions can return "out of host capacity" errors when provisioning the instance (retry/wait, one-time hiccup, not an ongoing issue).
+  - Signup requires a card for identity verification ($1 authorization hold, refunded — not a real charge).
+- **Phase 4 (optional, no longer the near-term plan):** self-owned refurb mini-PC. Since Phase 3 already solves remote access at $0, this is now optional — worth revisiting only if there's a separate reason to own the hardware, not required for Yamtrack access.
 
 ## Migration context (TV Time → Yamtrack)
 

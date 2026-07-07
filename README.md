@@ -2,18 +2,18 @@
 
 Docker Compose deployment for [Yamtrack](https://github.com/FuzzyGrim/Yamtrack), a self-hosted media tracker (movies, TV, anime, manga, games, books, comics). This repo holds only the deployment config, not the app source.
 
-Built to replace TV Time, which shut down 2026-07-15.
+## Stack
 
-## What this is
-
-- A pinned-version, SQLite-backed Yamtrack + Redis stack, run via `docker compose`.
-- Currently hosted on a local Mac, LAN-only (Phase 2). A move to a dedicated mini-PC with Tailscale for remote access is planned but deferred (Phase 3) — see below.
-- Started **empty**. TV Time history import is deliberately not part of this setup yet (see [Migration status](#migration-status)).
+- Yamtrack + Redis, pinned to a specific image version (never `latest`) for reproducible deploys.
+- SQLite-backed — the database is a single bind-mounted directory (`./db`), making backup and migration a matter of copying a folder rather than managing a separate database server.
+- Runs on Oracle Cloud's Always Free tier (ARM), accessed over [Tailscale](https://tailscale.com/) rather than a public IP — no exposed ports, no VPS bill.
+- Secrets are kept out of the tracked compose file via a git-ignored `.env`.
 
 ## Prerequisites
 
 - Docker and Docker Compose (`docker compose`, not the legacy `docker-compose`).
 - `openssl` (to generate the Django secret key).
+- An [Oracle Cloud](https://www.oracle.com/cloud/free/) account and [Tailscale](https://tailscale.com/) if deploying remotely (see below). Neither is needed to run this locally.
 
 ## Setup
 
@@ -64,17 +64,20 @@ This tars up `./db` and drops a timestamped archive in `~/yamtrack-backups/`. Th
    ```
 4. Start the stack again: `docker compose up -d`.
 
-## Migration status
+## Deploying on Oracle Cloud's Always Free tier
 
-Importing TV Time history is **blocked for now**: Simkl has paused free-tier imports (PRO-only currently). The TV Time export ZIP doesn't expire, so this is just deferred, not lost — it'll be imported once Simkl free imports resume or a PRO plan is used. Until then, the app runs empty and entries are added manually or via other supported [import sources](https://fuzzygrim.github.io/Yamtrack/release/media-imports/).
+Both `ghcr.io/fuzzygrim/yamtrack` and `redis:8-alpine` publish multi-arch images (amd64 + arm64), so this compose file runs unmodified on Oracle's free ARM shape — no changes needed for the architecture.
 
-## Phase 3 (deferred): migrating to a dedicated host
+1. Sign up at https://www.oracle.com/cloud/free/ (requires a card for identity verification only — a refunded $1 hold, not a charge). Pick a home region with reliable ARM capacity, e.g. `us-ashburn-1` or `us-phoenix-1`; this can't be changed later.
+2. Convert the account to Pay-As-You-Go billing. You're still charged nothing as long as usage stays within Always Free limits, but this step is required — it exempts the instance from Oracle's idle-instance reclamation policy, which a low-traffic personal app would otherwise likely trigger.
+3. Create a compute instance: shape `VM.Standard.A1.Flex`, Ubuntu image, using the full Always Free allocation (2 OCPU / 12 GB). If instance creation fails with "Out of host capacity," retry, try a different availability domain, or wait — this is a one-time provisioning hiccup, not an ongoing problem once the instance exists.
+4. Install Docker and Docker Compose on the instance.
+5. Install Tailscale on the instance and join it to your tailnet. Don't open any public inbound ports — access is Tailscale-only.
+6. Copy `docker-compose.yml` to the instance, and recreate `.env` there directly (don't transfer the file over an insecure channel).
+7. `docker compose up -d`, then reach the app at `http://<tailscale-hostname-or-ip>:8000`.
 
-Currently deferred because a suitable refurb mini-PC is more expensive than justified right now (RAM prices). When that changes:
+To migrate existing data rather than starting fresh, stop the stack on the old host, copy the `db/` directory over instead of skipping it, then start the stack on the new host — the same tar-based approach as [Backup / restore](#backup--restore) works for moving between hosts.
 
-1. On the new host, install Docker and Docker Compose.
-2. Copy `docker-compose.yml` and the entire `db/` directory to the new machine (same relative layout).
-3. Recreate `.env` on the new host (from `.env.example` plus the real `SECRET` — do not reuse the old `.env` file over an insecure channel; copy it directly or regenerate).
-4. Install [Tailscale](https://tailscale.com/) on the new host and join it to your tailnet, for remote access without a VPS or public port exposure.
-5. `docker compose up -d` on the new host; verify data is intact before decommissioning the old one.
-6. If exposing Yamtrack beyond the tailnet later, set `URLS` in `.env` per the [env var docs](https://fuzzygrim.github.io/Yamtrack/release/env-variables/) — not needed for LAN/Tailscale-only access.
+## Notes on TV Time migration
+
+This deployment replaces TV Time, which shut down 2026-07-15. Importing prior TV Time history is on hold — Simkl (the import path) has temporarily paused free-tier imports — so the app starts empty and history is backfilled later. Not a functional limitation of this deployment itself.
