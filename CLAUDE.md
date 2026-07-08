@@ -6,23 +6,35 @@ Built to migrate off TV Time, which shut down 2026-07-15.
 
 ## Locked decisions
 
-- **Deploy:** Docker Compose. Image pinned to a specific version (currently `0.25.3`), never `latest` — so this Mac and any future host run identical builds.
-- **DB:** SQLite (default), bind-mounted `./db:/yamtrack/db`. Chosen over Postgres for portability — backup is just copying a folder. Redis is required regardless (broker/cache), run as a separate container.
+- **Deploy:** Docker Compose. Image pinned to a specific version (currently `0.25.3`), never `latest` — so any host runs an identical, reproducible build.
+- **DB:** SQLite (default), bind-mounted `./db:/yamtrack/db`. Chosen over Postgres for portability — backup/migration is just copying a folder. Redis is required regardless (broker/cache), run as a separate container.
 - **Secrets:** real `SECRET` lives in git-ignored `.env`; committed `.env.example` holds a placeholder. `.gitignore` excludes `.env` and `db/`. Never commit either.
 
 ## Deployment phases
 
-- **Phase 2 (current):** hosted on this Mac, LAN-only, machine kept awake. No remote/internet access.
-- **Phase 3 (next, active plan):** move to Oracle Cloud's "Always Free" tier — a permanently free ARM VM (`VM.Standard.A1.Flex`, 2 OCPU/12 GB as of the June 2026 limit reduction), reached exclusively via Tailscale (no public inbound ports opened, same security posture as LAN-only). Both `ghcr.io/fuzzygrim/yamtrack:0.25.3` and `redis:8-alpine` are confirmed multi-arch (`linux/amd64` + `linux/arm64` — checked via `docker manifest inspect`), so `docker-compose.yml` runs there unmodified; no image or compose changes needed for the architecture switch itself.
-  - Convert the Oracle account to Pay-As-You-Go billing after signup (still $0 as long as usage stays within Always Free limits). This is required, not optional — it's what exempts the instance from Oracle's idle-instance auto-reclamation (instances idle >7 days at <20% CPU/network/memory get reclaimed), which a low-traffic personal app would likely trigger otherwise.
-  - Pick a home region with reliable A1 capacity at signup — e.g. `us-ashburn-1` or `us-phoenix-1`. Can't be changed later; busy regions can return "out of host capacity" errors when provisioning the instance (retry/wait, one-time hiccup, not an ongoing issue).
-  - Signup requires a card for identity verification ($1 authorization hold, refunded — not a real charge).
-- **Phase 4 (optional, no longer the near-term plan):** self-owned refurb mini-PC. Since Phase 3 already solves remote access at $0, this is now optional — worth revisiting only if there's a separate reason to own the hardware, not required for Yamtrack access.
+- **Phase 2 (retired 2026-07-07):** was hosted on this Mac, LAN-only. Stack stopped (`docker compose down`) once data was migrated to Phase 3 — not run going forward. Kept in history for reference only.
+- **Phase 3 (current, live since 2026-07-07):** Oracle Cloud "Always Free" tier — a permanently free ARM VM, reached exclusively via Tailscale.
+  - **Instance:** `VM.Standard.A1.Flex`, 2 OCPU / 12 GB (full Always Free allocation), Ubuntu 24.04 Minimal **aarch64**. Both `ghcr.io/fuzzygrim/yamtrack:0.25.3` and `redis:8-alpine` pulled natively as arm64 — confirmed multi-arch, no image/compose changes needed.
+  - **Access:** Tailscale-only. The default security list's SSH (port 22) ingress rule from `0.0.0.0/0` was deleted after setup — zero public inbound exposure. MagicDNS hostname `yamtrack-vnic` (full: `yamtrack-vnic.taile99e32.ts.net`) resolves from any tailnet device — used instead of the raw Tailscale IP (`100.70.228.90` as of creation; ephemeral, can change if ever detached/reattached).
+  - **SSH key:** `~/.ssh/oracle-yamtrack.key` on this Mac.
+  - **Tailnet devices:** this Mac, iPhone, and the Oracle instance (`yamtrack-vnic`) itself.
+  - Billing converted to Pay-As-You-Go (required for idle-instance-reclamation exemption — see below); OCI Budget Alert set at $1/absolute-$0.01-threshold as a spend tripwire.
+  - `backup.sh` pulls `db.sqlite3` from this instance over SSH/Tailscale — the Mac is no longer the live host, so backups are no longer a local tar of `./db`.
+- **Phase 4 (optional, no longer the near-term plan):** self-owned refurb mini-PC. Since Phase 3 already solves remote access at $0, this is optional — worth revisiting only if there's a separate reason to own the hardware.
+
+## Oracle instance setup — real gotchas hit (read before touching this instance again)
+
+- **Image picker lists a plain and an "aarch64"-suffixed build per Ubuntu version.** The plain one is amd64 and gets rejected by `VM.Standard.A1.Flex` ("shape not compatible with image"). Always pick the aarch64-suffixed image for this ARM shape.
+- The Flex shape defaults to 1 OCPU/6 GB; the sliders to reach the full 2 OCPU/12 GB free allocation live inside the "Change shape" panel, not the main create-instance form.
+- The console's "View estimated cost" button shows a non-zero figure (~$2/month) purely because the boot volume is priced at list rate there — it doesn't net out the 200 GB Always Free block storage allowance. Known display quirk, not a real forthcoming charge; actual billing (Cost Analysis) reflects the free allowance correctly.
+- The "Automatically assign public IPv4 address" toggle in the instance-creation wizard got stuck disabled/off even with a public subnet selected (console state bug). Workaround: create the instance anyway, then attach an ephemeral public IP afterward via Instance → Networking → VNIC → IP Addresses → Edit → Public IP Type → Ephemeral Public IP.
+- **Critical — do not remove the instance's public IP without a NAT Gateway.** OCI's public-subnet Internet Gateway model requires the instance to hold its own public IP for *outbound* internet too — unlike AWS, there's no default SNAT/NAT Gateway equivalent unless one is explicitly built. Removing the public IP (attempted once, as a hardening step) killed all outbound connectivity, which broke Tailscale entirely (it couldn't reach its coordination servers) and required attaching a fresh ephemeral IP to recover. The correct way to close public exposure instead: delete the security list's SSH (port 22) ingress rule. This doesn't touch the public IP or outbound routing, and doesn't affect Tailscale either (Tailscale traffic tunnels outside the normal VCN ingress path, so it was never gated by that rule to begin with).
+- OCI's Instance Console Connection (hypervisor-level serial console, via the web console) is a genuine network-independent break-glass fallback if Tailscale and SSH are ever both unreachable. Not set up, but available if ever needed — requires its own one-time SSH key upload.
 
 ## Migration context (TV Time → Yamtrack)
 
 - Importing TV Time history is **blocked, do not attempt**: Simkl has paused free-tier imports (PRO-only currently). The TV Time export ZIP is safe and does not expire, so the import happens later once Simkl free imports resume or a PRO plan is used.
-- The app is intentionally stood up empty for now — absence of data on first run is expected, not a bug.
+- The app started empty and now has real (if minimal) user data from normal use — absence of TV Time history specifically is expected, not a bug.
 
 ## Features considered and not adopted (for now)
 
@@ -32,10 +44,10 @@ Built to migrate off TV Time, which shut down 2026-07-15.
 ## Layout
 
 - `docker-compose.yml` — SQLite variant (yamtrack + redis). No Postgres variant in use.
-- `.env` — real secrets, gitignored. Contains `SECRET` (Django secret key).
+- `.env` — real secrets, gitignored. Contains `SECRET` (Django secret key) and `REGISTRATION=False`. Lives only on the Oracle instance now (regenerated there directly, never transferred from the Mac).
 - `.env.example` — committed placeholder template for `.env`.
-- `db/` — gitignored, created at runtime by the container (SQLite database + media).
-- `backup.sh` — snapshots `db/` to `~/yamtrack-backups/` with a timestamped archive.
+- `db/` — gitignored; historical local copy from when the Mac was the host. Live data now lives only on the Oracle instance at `~/yamtrack/db/db.sqlite3`.
+- `backup.sh` — pulls `db.sqlite3` from the Oracle instance over SSH/Tailscale and snapshots it to `~/yamtrack-backups/` with a timestamp.
 
 ## Upstream facts (verified 2026-07-06 against github.com/FuzzyGrim/Yamtrack `release` branch, live ghcr.io registry, and GitHub Releases API)
 

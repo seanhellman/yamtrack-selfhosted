@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DB_DIR="$SCRIPT_DIR/db"
+ORACLE_HOST="ubuntu@100.70.228.90"
+ORACLE_KEY="$HOME/.ssh/oracle-yamtrack.key"
+REMOTE_DB_PATH="~/yamtrack/db/db.sqlite3"
+
 BACKUP_DIR="$HOME/yamtrack-backups"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 ARCHIVE="$BACKUP_DIR/yamtrack-db-$TIMESTAMP.tar.gz"
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
 
-if [ ! -d "$DB_DIR" ]; then
-  echo "Error: $DB_DIR not found. Run this from the repo root after the stack has started at least once." >&2
-  exit 1
-fi
+mkdir -p "$BACKUP_DIR" "$TMP_DIR/db"
+scp -i "$ORACLE_KEY" "$ORACLE_HOST:$REMOTE_DB_PATH" "$TMP_DIR/db/db.sqlite3"
+tar -czf "$ARCHIVE" -C "$TMP_DIR" db
 
-mkdir -p "$BACKUP_DIR"
-tar -czf "$ARCHIVE" -C "$SCRIPT_DIR" db
-
-echo "Backed up $DB_DIR -> $ARCHIVE"
+echo "Backed up $ORACLE_HOST:$REMOTE_DB_PATH -> $ARCHIVE"
