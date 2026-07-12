@@ -21,5 +21,21 @@ services:
     volumes:
       - redis_data:/data
 
+  # "Watch Next" companion app — reads Yamtrack's SQLite DB directly to show
+  # aired-but-unwatched episodes. See watchnext/ and README.md.
+  watchnext:
+    container_name: yamtrack-watchnext
+    build: ./watchnext
+    restart: unless-stopped
+    # Yamtrack's DB is WAL mode, so this is mounted read/write (a reader must be
+    # able to update the -shm/-wal sidecars); write protection is enforced
+    # in-process via PRAGMA query_only. Runs as 1000:1000 — the uid/gid that
+    # owns the DB files — so it can touch those sidecars.
+    user: "1000:1000"
+    volumes:
+      - ./db:/yamtrack/db
+    ports:
+      - "8090:8090"
+
 volumes:
   redis_data:

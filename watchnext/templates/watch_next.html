@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#212529">
+  <title>Watch Next</title>
+  <style>
+    :root {
+      --bg: #212529;
+      --card: #2a2f35;
+      --text: #f1f3f5;
+      --muted: #9aa0a6;
+      --accent: #6366f1;
+      --new: #f5c518;
+      --new-text: #1a1a1a;
+      --premiere: #111417;
+      --premiere-text: #f1f3f5;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    header {
+      padding: 20px 16px 8px;
+      max-width: 640px;
+      margin: 0 auto;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.5rem;
+      letter-spacing: 0.02em;
+    }
+    header p { margin: 4px 0 0; color: var(--muted); font-size: 0.85rem; }
+    main { max-width: 640px; margin: 0 auto; padding: 8px 16px 40px; }
+    .card {
+      display: flex;
+      align-items: stretch;
+      background: var(--card);
+      border-radius: 12px;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+    .poster {
+      width: 92px;
+      min-width: 92px;
+      object-fit: cover;
+      background: #12151a;
+    }
+    .body {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 6px;
+      padding: 12px 14px;
+      min-width: 0;
+    }
+    .show {
+      font-weight: 700;
+      font-size: 1rem;
+      line-height: 1.2;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 1;
+      -webkit-box-orient: vertical;
+    }
+    .ep { color: var(--text); font-size: 0.95rem; }
+    .ep .more { color: var(--muted); font-size: 0.8rem; margin-left: 6px; }
+    .badge {
+      align-self: flex-start;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      padding: 3px 8px;
+      border-radius: 5px;
+    }
+    .badge.NEW { background: var(--new); color: var(--new-text); }
+    .badge.PREMIERE { background: var(--premiere); color: var(--premiere-text); }
+    .empty, .error {
+      background: var(--card);
+      border-radius: 12px;
+      padding: 24px 18px;
+      text-align: center;
+      color: var(--muted);
+    }
+    .error { border: 1px solid #7f1d1d; color: #fca5a5; text-align: left; }
+    .error code { word-break: break-word; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Watch Next</h1>
+    <p>Aired episodes you haven't watched yet</p>
+  </header>
+  <main>
+    {% if error %}
+      <div class="error">
+        <strong>Couldn't load your list.</strong>
+        <p><code>{{ error }}</code></p>
+      </div>
+    {% elif not episodes %}
+      <div class="empty">You're all caught up. 🎉</div>
+    {% else %}
+      {% for ep in episodes %}
+        <article class="card">
+          {% if ep.show_image %}
+            <img class="poster" src="{{ ep.show_image }}" alt="" loading="lazy">
+          {% endif %}
+          <div class="body">
+            <div class="show">{{ ep.show_title }}</div>
+            <div class="ep">
+              S{{ '%02d' % ep.season_number }}E{{ '%02d' % ep.episode_number }}
+              {% if ep.outstanding_count > 1 %}<span class="more">+{{ ep.outstanding_count - 1 }}</span>{% endif %}
+            </div>
+            <span class="badge {{ ep.badge }}">{{ ep.badge }}</span>
+          </div>
+        </article>
+      {% endfor %}
+    {% endif %}
+  </main>
+</body>
+</html>

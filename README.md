@@ -8,6 +8,7 @@ Docker Compose deployment for [Yamtrack](https://github.com/FuzzyGrim/Yamtrack),
 - SQLite-backed — the database is a single bind-mounted directory (`./db`), making backup and migration a matter of copying a folder rather than managing a separate database server.
 - Runs on Oracle Cloud's Always Free tier (ARM), accessed exclusively over [Tailscale](https://tailscale.com/) — no public inbound ports, no VPS bill.
 - Secrets are kept out of the tracked compose file via a git-ignored `.env`.
+- Ships with a small **"Watch Next" companion app** (`watchnext/`) — a separate service that reads Yamtrack's DB to show a TV Time-style list of aired-but-unwatched episodes. See [Watch Next companion app](#watch-next-companion-app).
 
 ## Prerequisites
 
@@ -89,6 +90,39 @@ To migrate existing data rather than starting fresh, stop the stack on the old h
 ### Access from other devices
 
 Install Tailscale on any device you want access from (Mac, iPhone, etc.) and sign in with the same account — MagicDNS makes the instance reachable by hostname from all of them automatically, no per-device configuration needed.
+
+## Watch Next companion app
+
+Yamtrack's Home page lists shows that are *in progress*, but doesn't surface a plain "here are the aired episodes you haven't watched yet" list (the thing TV Time did well). `watchnext/` is a small, self-contained companion app that fills that gap — a separate container in this same compose stack, not a fork or modification of Yamtrack.
+
+- **Read-only.** It opens Yamtrack's own SQLite DB and runs `SELECT`s only. Because Yamtrack's DB is in WAL mode, the container mounts `./db` read/write (a WAL reader must be able to update the `-shm`/`-wal` sidecars) and runs as uid/gid `1000` (the DB files' owner), but write protection is enforced at the SQLite engine level via `PRAGMA query_only = ON` — any write is rejected with `SQLITE_READONLY`. It never modifies your data.
+- **What it shows:** for each in-progress season, the earliest aired episode you haven't watched, with a `+N` count of how many more are backed up behind it, sorted soonest-aired-first, badged `PREMIERE` (season openers) or `NEW`.
+- **Access:** served on port `8090`, reached over Tailscale exactly like Yamtrack itself — e.g. `http://<tailscale-hostname>:8090`. No new public exposure.
+
+It's built and started as part of the normal `docker compose up -d`. To (re)build and start just this service:
+
+```bash
+docker compose up -d --build watchnext
+```
+
+### Local development
+
+The app can be run against a copy of the DB without Docker:
+
+```bash
+cd watchnext
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+WATCHNEXT_DB_PATH=/path/to/a/copy/of/db.sqlite3 \
+  waitress-serve --host=127.0.0.1 --port=8090 app:app
+```
+
+Then open http://localhost:8090. Point `WATCHNEXT_DB_PATH` at a *copy* of the DB (e.g. one produced by `./backup.sh`) rather than a live production file. `WATCHNEXT_USERNAME` can be set to pick a specific Yamtrack user; if unset, it uses the single user in the DB (the expected case here).
+
+### Planned phases (not yet built)
+
+- **Phase 1b — episode titles:** currently episodes show as `S05E01` with no title, because Yamtrack only stores full per-episode metadata once an episode is watched. Real titles would come from a TMDB API lookup (its own `TMDB_API` env var, graceful fallback to number-only labels if unset).
+- **Phase 2 — mark as watched:** a checkmark on each card that marks the episode watched. This will POST to Yamtrack's *own* endpoint (authenticating as you), so Yamtrack's cascading status logic runs correctly — rather than writing to the DB directly.
 
 ## Notes on TV Time migration
 

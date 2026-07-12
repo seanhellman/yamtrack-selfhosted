@@ -1,2 +1,7 @@
 .env
 db/
+
+# Python virtualenv (local dev for the watchnext companion app)
+.venv/
+watchnext/.venv/
+__pycache__/

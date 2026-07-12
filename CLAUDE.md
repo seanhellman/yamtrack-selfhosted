@@ -48,6 +48,18 @@ Built to migrate off TV Time, which shut down 2026-07-15.
 - `.env.example` — committed placeholder template for `.env`.
 - `db/` — gitignored; historical local copy from when the Mac was the host. Live data now lives only on the Oracle instance at `~/yamtrack/db/db.sqlite3`.
 - `backup.sh` — pulls `db.sqlite3` from the Oracle instance over SSH/Tailscale and snapshots it to `~/yamtrack-backups/` with a timestamp.
+- `watchnext/` — the "Watch Next" companion app (Flask). Separate compose service, port 8090. See its own section below.
+
+## Watch Next companion app (`watchnext/`)
+
+A small Flask app that reads Yamtrack's SQLite DB to render a TV Time-style list of aired-but-unwatched episodes — the view Yamtrack's own Home page lacks. A separate compose service (`yamtrack-watchnext`, port 8090), **not** a fork of Yamtrack. Built during a `simplify`/companion-app effort after the core deployment was live.
+
+- **Read path, not write path.** Phase 1 is read-only: opens the DB and runs SELECTs only. Phase 2 (mark-as-watched, not built) will POST to Yamtrack's *own* `episode_save` endpoint rather than writing the DB directly, because that endpoint has cascading status logic (episode→season→show auto-transitions) that must not be reimplemented.
+- **WAL gotcha (the key technical decision):** Yamtrack's DB runs in WAL mode (verified: live `-wal`/`-shm` sidecars). A `:ro` mount or `mode=ro` connection does NOT reliably read a WAL DB — the reader must be able to update the `-shm` wal-index, and `mode=ro` only works when the `-wal` file is empty (intermittent, and silently misses uncheckpointed writes). So: mount `./db` **read/write**, run the container as **uid/gid 1000** (owner of the DB files, so it can touch the sidecars), and enforce read-only-ness in-process via `PRAGMA query_only = ON` (verified it rejects writes with `SQLITE_READONLY`). Do not "harden" this back to a `:ro` mount — it will break reads.
+- **Schema facts that drove the query** (verified against the real DB, not assumed): there is no per-episode "watched" flag; a row in `app_episode` *is* a watch instance, and its `item_id` → `app_item.episode_number` gives which episode. Crucially, **episode-numbered `app_item` rows only exist for episodes already watched** — the air-date schedule for *unwatched* episodes lives on `events_event` rows attached to the *season's* `app_item`, with `content_number` standing in for episode number. The query joins in-progress `app_season` → `events_event` (aired, `content_number` not yet in the watched set). First naive version keyed off per-episode items and silently returned nothing.
+- **Config:** `WATCHNEXT_DB_PATH` (default `/yamtrack/db/db.sqlite3`), `WATCHNEXT_USERNAME` (optional; defaults to the sole user).
+- **Phase 1b (not built):** episode titles via a TMDB lookup (`series_id` = `app_item.media_id` when `source='tmdb'`); needs TMDB attribution notice + logo per their terms; own `TMDB_API` env var, graceful fallback to `SxxExx`-only labels.
+- Full design/status: `~/.claude/plans/cached-skipping-micali.md`.
 
 ## Upstream facts (verified 2026-07-06 against github.com/FuzzyGrim/Yamtrack `release` branch, live ghcr.io registry, and GitHub Releases API)
 
