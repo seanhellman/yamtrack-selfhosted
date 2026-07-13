@@ -53,6 +53,7 @@
     }
     .body {
       display: flex;
+      flex: 1 1 auto;
       flex-direction: column;
       justify-content: center;
       gap: 6px;
@@ -90,6 +91,40 @@
     }
     .badge.NEW { background: var(--new); color: var(--new-text); }
     .badge.PREMIERE { background: var(--premiere); color: var(--premiere-text); }
+    .actions {
+      display: flex;
+      align-items: center;
+      padding: 0 14px;
+      margin: 0;
+    }
+    .check {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: 2px solid #4b5563;
+      background: transparent;
+      color: var(--text);
+      font-size: 1.15rem;
+      line-height: 1;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .check:hover, .check:focus-visible {
+      background: var(--accent);
+      border-color: var(--accent);
+      outline: none;
+    }
+    .flash {
+      border-radius: 10px;
+      padding: 10px 14px;
+      margin-bottom: 12px;
+      font-size: 0.9rem;
+      transition: opacity 0.4s ease, transform 0.4s ease;
+    }
+    .flash.hiding { opacity: 0; transform: translateY(-8px); }
+    .flash.success { background: #14351f; color: #86efac; border: 1px solid #166534; }
+    .flash.error { background: #3a1414; color: #fca5a5; border: 1px solid #7f1d1d; }
     .empty, .error {
       background: var(--card);
       border-radius: 12px;
@@ -119,6 +154,9 @@
     <p>Aired episodes you haven't watched yet</p>
   </header>
   <main>
+    {% for category, message in flashes %}
+      <div class="flash {{ category }}">{{ message }}</div>
+    {% endfor %}
     {% if error %}
       <div class="error">
         <strong>Couldn't load your list.</strong>
@@ -141,6 +179,15 @@
             {% if ep.episode_title %}<div class="title">{{ ep.episode_title }}</div>{% endif %}
             <span class="badge {{ ep.badge }}">{{ ep.badge }}</span>
           </div>
+          {% if marking_enabled %}
+            <form class="actions" method="post" action="{{ url_for('mark_watched') }}">
+              <input type="hidden" name="media_id" value="{{ ep.media_id }}">
+              <input type="hidden" name="source" value="{{ ep.source }}">
+              <input type="hidden" name="season_number" value="{{ ep.season_number }}">
+              <input type="hidden" name="episode_number" value="{{ ep.episode_number }}">
+              <button class="check" type="submit" title="Mark watched" aria-label="Mark watched">&check;</button>
+            </form>
+          {% endif %}
         </article>
       {% endfor %}
     {% endif %}
@@ -151,5 +198,14 @@
       <span>This product uses the TMDB API but is not endorsed or certified by TMDB.</span>
     </footer>
   {% endif %}
+  <script>
+    // Auto-dismiss success toasts after a few seconds; leave errors up to read.
+    setTimeout(function () {
+      document.querySelectorAll('.flash.success').forEach(function (el) {
+        el.classList.add('hiding');
+        setTimeout(function () { el.remove(); }, 400);
+      });
+    }, 3000);
+  </script>
 </body>
 </html>

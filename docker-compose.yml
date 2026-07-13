@@ -32,6 +32,10 @@ services:
     env_file:
       - path: watchnext/.env
         required: false
+    # Match Yamtrack's timezone so a "mark watched" records the correct local
+    # time (episode_save stores the datetime we send as now).
+    environment:
+      - TZ=America/Los_Angeles
     # Yamtrack's DB is WAL mode, so this is mounted read/write (a reader must be
     # able to update the -shm/-wal sidecars); write protection is enforced
     # in-process via PRAGMA query_only. Runs as 1000:1000 — the uid/gid that

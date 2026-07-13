@@ -95,9 +95,10 @@ Install Tailscale on any device you want access from (Mac, iPhone, etc.) and sig
 
 Yamtrack's Home page lists shows that are *in progress*, but doesn't surface a plain "here are the aired episodes you haven't watched yet" list (the thing TV Time did well). `watchnext/` is a small, self-contained companion app that fills that gap — a separate container in this same compose stack, not a fork or modification of Yamtrack.
 
-- **Read-only.** It opens Yamtrack's own SQLite DB and runs `SELECT`s only. Because Yamtrack's DB is in WAL mode, the container mounts `./db` read/write (a WAL reader must be able to update the `-shm`/`-wal` sidecars) and runs as uid/gid `1000` (the DB files' owner), but write protection is enforced at the SQLite engine level via `PRAGMA query_only = ON` — any write is rejected with `SQLITE_READONLY`. It never modifies your data.
+- **Reads the DB directly; never writes it.** It opens Yamtrack's own SQLite DB and runs `SELECT`s only. Because Yamtrack's DB is in WAL mode, the container mounts `./db` read/write (a WAL reader must be able to update the `-shm`/`-wal` sidecars) and runs as uid/gid `1000` (the DB files' owner), but write protection is enforced at the SQLite engine level via `PRAGMA query_only = ON` — any write is rejected with `SQLITE_READONLY`. The one write action (mark-watched, below) does *not* touch the DB — it goes through Yamtrack's own HTTP endpoint — so this read-only-DB invariant holds even with marking enabled.
 - **What it shows:** for each in-progress season, the earliest aired episode you haven't watched, with a `+N` count of how many more are backed up behind it, sorted soonest-aired-first, badged `PREMIERE` (season openers) or `NEW`.
 - **Episode titles (optional):** with a TMDB API token configured (see below), each row also shows the episode's real title (e.g. `S05E01 · First Light`). Without a token it degrades gracefully to number-only labels.
+- **Mark as watched (optional):** with Yamtrack credentials configured (see below), each card gets a checkmark that marks that episode watched and drops it off the list.
 - **Access:** served on port `8090`, reached over Tailscale exactly like Yamtrack itself — e.g. `http://<tailscale-hostname>:8090`. No new public exposure.
 
 ### Episode titles via TMDB (optional)
@@ -112,6 +113,18 @@ Yamtrack only stores full per-episode metadata (including the title) once an epi
   This file is git-ignored. The compose service loads it via `env_file` (marked optional — the app runs fine without it).
 - Lookups are best-effort and cached in-process: any failure (no token, network error, rate limit, 404) falls back to the `SxxExx` label and never breaks the page. Only `tmdb`-source shows are looked up.
 - **Attribution:** per TMDB's terms, when a token is configured the page footer shows the TMDB logo (`watchnext/static/tmdb.svg`) and the required notice. This product uses the TMDB API but is not endorsed or certified by TMDB.
+
+### Mark as watched (optional)
+
+Set `YAMTRACK_PASSWORD` in `watchnext/.env` to enable a checkmark on each card. Clicking it marks that episode watched, then the list re-renders (the episode drops off, or the next outstanding one for that show takes its place).
+
+- **How it works:** the app logs in as you (Yamtrack's own allauth session + CSRF) and POSTs to Yamtrack's own `episode_save` endpoint — the same path Yamtrack's UI uses. This deliberately does **not** write the SQLite DB directly: creating a watch record triggers Yamtrack's model-level status cascade (episode → season → show auto-completion), which must not be reimplemented. So the DB connection stays strictly read-only (`query_only`); the only write is this HTTP call.
+- **Config** (all in the git-ignored `watchnext/.env`):
+  - `YAMTRACK_PASSWORD` — your Yamtrack password. Required to show the checkmark; if unset, the feature is simply hidden.
+  - `YAMTRACK_USERNAME` — optional; defaults to the sole user in the DB.
+  - `YAMTRACK_URL` — optional; defaults to `http://yamtrack:8000` (the compose service name).
+- **Credential note:** this stores your Yamtrack password on the instance (git-ignored, Tailscale-only, single-user). The bounded risk is acceptable because the app already has filesystem access to the same DB; the main caveat is not to reuse that password elsewhere.
+- **Resilience:** the session is reused across marks and silently re-established if it expires; any failure (bad credentials, Yamtrack unreachable) surfaces as an error banner and never crashes the page.
 
 It's built and started as part of the normal `docker compose up -d`. To (re)build and start just this service:
 
@@ -131,11 +144,7 @@ WATCHNEXT_DB_PATH=/path/to/a/copy/of/db.sqlite3 \
   waitress-serve --host=127.0.0.1 --port=8090 app:app
 ```
 
-Then open http://localhost:8090. Point `WATCHNEXT_DB_PATH` at a *copy* of the DB (e.g. one produced by `./backup.sh`) rather than a live production file. `WATCHNEXT_USERNAME` can be set to pick a specific Yamtrack user; if unset, it uses the single user in the DB (the expected case here). Set `TMDB_API` to also exercise episode-title lookups locally.
-
-### Planned phases (not yet built)
-
-- **Phase 2 — mark as watched:** a checkmark on each card that marks the episode watched. This will POST to Yamtrack's *own* endpoint (authenticating as you), so Yamtrack's cascading status logic runs correctly — rather than writing to the DB directly.
+Then open http://localhost:8090. Point `WATCHNEXT_DB_PATH` at a *copy* of the DB (e.g. one produced by `./backup.sh`) rather than a live production file. `WATCHNEXT_USERNAME` can be set to pick a specific Yamtrack user; if unset, it uses the single user in the DB (the expected case here). Set `TMDB_API` to also exercise episode-title lookups locally. To exercise mark-watched safely, point `YAMTRACK_URL` at a throwaway Yamtrack running against a *copy* of the DB rather than your live instance.
 
 ## Notes on TV Time migration
 

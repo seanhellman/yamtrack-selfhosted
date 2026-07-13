@@ -105,6 +105,26 @@ def resolve_user_id(db_path: str, username: Optional[str]) -> int:
         conn.close()
 
 
+def resolve_username(db_path: str, username: Optional[str]) -> str:
+    """Return the Yamtrack login username. If not configured, defaults to the
+    sole user in the DB (the expected single-user case). Used by the mark-watched
+    client so YAMTRACK_USERNAME can be left unset."""
+    if username:
+        return username
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(_SOLE_USER_SQL).fetchall()
+        if len(rows) != 1:
+            names = ", ".join(r["username"] for r in rows)
+            raise ValueError(
+                "YAMTRACK_USERNAME must be set when there isn't exactly one "
+                f"Yamtrack user (found: {names or 'none'})"
+            )
+        return rows[0]["username"]
+    finally:
+        conn.close()
+
+
 def get_outstanding_episodes(db_path: str, user_id: int) -> list[dict]:
     conn = _connect(db_path)
     try:
