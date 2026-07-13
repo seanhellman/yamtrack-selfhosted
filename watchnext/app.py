@@ -51,7 +51,10 @@ def watch_next():
         episodes=episodes,
         error=error,
         tmdb_enabled=tmdb.enabled(),
-        marking_enabled=yamtrack_client.enabled(),
+        # Only show the checkmark if marking can actually work: a password AND a
+        # resolvable username. (Single-user always resolves; guards the multi-user
+        # "password set but username unresolved" case from showing a dead button.)
+        marking_enabled=yamtrack_client.enabled() and bool(yamtrack_client.username),
         flashes=get_flashed_messages(with_categories=True),
     )
 

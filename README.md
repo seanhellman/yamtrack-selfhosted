@@ -52,7 +52,9 @@ The image is pinned in `docker-compose.yml` (e.g. `ghcr.io/fuzzygrim/yamtrack:0.
 ./backup.sh
 ```
 
-Pulls `db.sqlite3` from the live host over SSH/Tailscale and drops a timestamped archive in `~/yamtrack-backups/`. The app can stay running while you do this — SQLite handles concurrent reads fine for a personal-scale backup snapshot.
+Takes a **transactionally consistent** snapshot of the live DB over SSH/Tailscale and drops a timestamped archive in `~/yamtrack-backups/`, verified with `PRAGMA integrity_check`. The app can stay running.
+
+The DB is WAL-mode, so this deliberately does *not* just `scp db.sqlite3` — recent transactions can still live in the `-wal` sidecar, and a plain copy would silently miss them (or tear the file mid-checkpoint). Instead it uses SQLite's online backup API on the instance (run as root, which can read through the WAL) to produce a clean single-file copy. Runs are currently manual; automating them is a planned follow-up (see CLAUDE.md deployment phases).
 
 ### Restore
 
@@ -145,6 +147,14 @@ WATCHNEXT_DB_PATH=/path/to/a/copy/of/db.sqlite3 \
 ```
 
 Then open http://localhost:8090. Point `WATCHNEXT_DB_PATH` at a *copy* of the DB (e.g. one produced by `./backup.sh`) rather than a live production file. `WATCHNEXT_USERNAME` can be set to pick a specific Yamtrack user; if unset, it uses the single user in the DB (the expected case here). Set `TMDB_API` to also exercise episode-title lookups locally. To exercise mark-watched safely, point `YAMTRACK_URL` at a throwaway Yamtrack running against a *copy* of the DB rather than your live instance.
+
+### Tests
+
+```bash
+python3 watchnext/tests/test_queries.py
+```
+
+Self-contained (stdlib only, builds its own fixture DB — no live DB or network). It asserts the outstanding-episodes query's edge cases (gap handling, aired/status filters, badges, ordering, multi-season, empty). **Run it after bumping the pinned Yamtrack image** — it's the cheapest way to catch the query silently drifting if Yamtrack's DB schema changed.
 
 ## Notes on TV Time migration
 
