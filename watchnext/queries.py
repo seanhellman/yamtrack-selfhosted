@@ -50,6 +50,8 @@ outstanding_episodes AS (
 SELECT
     tv_item.title AS show_title,
     tv_item.image AS show_image,
+    tv_item.media_id AS media_id,
+    tv_item.source AS source,
     oe.season_number,
     oe.episode_number,
     oe.outstanding_count
@@ -123,10 +125,13 @@ def get_outstanding_episodes(db_path: str, user_id: int) -> list[dict]:
             {
                 "show_title": row["show_title"],
                 "show_image": row["show_image"],
+                "media_id": row["media_id"],
+                "source": row["source"],
                 "season_number": row["season_number"],
                 "episode_number": row["episode_number"],
                 "outstanding_count": row["outstanding_count"],
                 "badge": "PREMIERE" if row["episode_number"] == 1 else "NEW",
+                "episode_title": None,  # filled in by the TMDB lookup (Phase 1b)
             }
         )
     return episodes

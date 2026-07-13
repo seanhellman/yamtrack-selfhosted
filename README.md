@@ -97,7 +97,21 @@ Yamtrack's Home page lists shows that are *in progress*, but doesn't surface a p
 
 - **Read-only.** It opens Yamtrack's own SQLite DB and runs `SELECT`s only. Because Yamtrack's DB is in WAL mode, the container mounts `./db` read/write (a WAL reader must be able to update the `-shm`/`-wal` sidecars) and runs as uid/gid `1000` (the DB files' owner), but write protection is enforced at the SQLite engine level via `PRAGMA query_only = ON` — any write is rejected with `SQLITE_READONLY`. It never modifies your data.
 - **What it shows:** for each in-progress season, the earliest aired episode you haven't watched, with a `+N` count of how many more are backed up behind it, sorted soonest-aired-first, badged `PREMIERE` (season openers) or `NEW`.
+- **Episode titles (optional):** with a TMDB API token configured (see below), each row also shows the episode's real title (e.g. `S05E01 · First Light`). Without a token it degrades gracefully to number-only labels.
 - **Access:** served on port `8090`, reached over Tailscale exactly like Yamtrack itself — e.g. `http://<tailscale-hostname>:8090`. No new public exposure.
+
+### Episode titles via TMDB (optional)
+
+Yamtrack only stores full per-episode metadata (including the title) once an episode is watched, so unwatched "watch next" episodes have no local title. The app can fetch it from [TMDB](https://www.themoviedb.org/) on demand.
+
+- Get a free **API Read Access Token** at https://www.themoviedb.org/settings/api (personal use).
+- Create `watchnext/.env` from the template and add your token:
+  ```bash
+  cp watchnext/.env.example watchnext/.env   # then edit TMDB_API=...
+  ```
+  This file is git-ignored. The compose service loads it via `env_file` (marked optional — the app runs fine without it).
+- Lookups are best-effort and cached in-process: any failure (no token, network error, rate limit, 404) falls back to the `SxxExx` label and never breaks the page. Only `tmdb`-source shows are looked up.
+- **Attribution:** per TMDB's terms, when a token is configured the page footer shows the TMDB logo (`watchnext/static/tmdb.svg`) and the required notice. This product uses the TMDB API but is not endorsed or certified by TMDB.
 
 It's built and started as part of the normal `docker compose up -d`. To (re)build and start just this service:
 
@@ -117,11 +131,10 @@ WATCHNEXT_DB_PATH=/path/to/a/copy/of/db.sqlite3 \
   waitress-serve --host=127.0.0.1 --port=8090 app:app
 ```
 
-Then open http://localhost:8090. Point `WATCHNEXT_DB_PATH` at a *copy* of the DB (e.g. one produced by `./backup.sh`) rather than a live production file. `WATCHNEXT_USERNAME` can be set to pick a specific Yamtrack user; if unset, it uses the single user in the DB (the expected case here).
+Then open http://localhost:8090. Point `WATCHNEXT_DB_PATH` at a *copy* of the DB (e.g. one produced by `./backup.sh`) rather than a live production file. `WATCHNEXT_USERNAME` can be set to pick a specific Yamtrack user; if unset, it uses the single user in the DB (the expected case here). Set `TMDB_API` to also exercise episode-title lookups locally.
 
 ### Planned phases (not yet built)
 
-- **Phase 1b — episode titles:** currently episodes show as `S05E01` with no title, because Yamtrack only stores full per-episode metadata once an episode is watched. Real titles would come from a TMDB API lookup (its own `TMDB_API` env var, graceful fallback to number-only labels if unset).
 - **Phase 2 — mark as watched:** a checkmark on each card that marks the episode watched. This will POST to Yamtrack's *own* endpoint (authenticating as you), so Yamtrack's cascading status logic runs correctly — rather than writing to the DB directly.
 
 ## Notes on TV Time migration

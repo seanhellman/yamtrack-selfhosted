@@ -27,6 +27,11 @@ services:
     container_name: yamtrack-watchnext
     build: ./watchnext
     restart: unless-stopped
+    # Optional — supplies TMDB_API for episode-title lookups. The app runs fine
+    # without it (plain SxxExx labels), so the file isn't required to exist.
+    env_file:
+      - path: watchnext/.env
+        required: false
     # Yamtrack's DB is WAL mode, so this is mounted read/write (a reader must be
     # able to update the -shm/-wal sidecars); write protection is enforced
     # in-process via PRAGMA query_only. Runs as 1000:1000 — the uid/gid that

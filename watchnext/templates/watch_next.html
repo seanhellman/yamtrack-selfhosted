@@ -71,6 +71,15 @@
     }
     .ep { color: var(--text); font-size: 0.95rem; }
     .ep .more { color: var(--muted); font-size: 0.8rem; margin-left: 6px; }
+    .title {
+      color: var(--muted);
+      font-size: 0.85rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 1;
+      -webkit-box-orient: vertical;
+    }
     .badge {
       align-self: flex-start;
       font-size: 0.7rem;
@@ -90,6 +99,18 @@
     }
     .error { border: 1px solid #7f1d1d; color: #fca5a5; text-align: left; }
     .error code { word-break: break-word; }
+    footer.attribution {
+      max-width: 640px;
+      margin: 24px auto 0;
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 0.7rem;
+      line-height: 1.4;
+    }
+    footer.attribution img { height: 16px; width: auto; flex-shrink: 0; }
   </style>
 </head>
 <body>
@@ -117,11 +138,18 @@
               S{{ '%02d' % ep.season_number }}E{{ '%02d' % ep.episode_number }}
               {% if ep.outstanding_count > 1 %}<span class="more">+{{ ep.outstanding_count - 1 }}</span>{% endif %}
             </div>
+            {% if ep.episode_title %}<div class="title">{{ ep.episode_title }}</div>{% endif %}
             <span class="badge {{ ep.badge }}">{{ ep.badge }}</span>
           </div>
         </article>
       {% endfor %}
     {% endif %}
   </main>
+  {% if tmdb_enabled %}
+    <footer class="attribution">
+      <img src="{{ url_for('static', filename='tmdb.svg') }}" alt="TMDB">
+      <span>This product uses the TMDB API but is not endorsed or certified by TMDB.</span>
+    </footer>
+  {% endif %}
 </body>
 </html>
