@@ -1,6 +1,10 @@
 .env
 db/
 
+# Local-only, never-committed working files (PII, exports, scratch data).
+# e.g. local/tv-time-export-data/ — the TV Time GDPR dump (access tokens, IPs).
+local/
+
 # Python virtualenv (local dev for the watchnext companion app)
 .venv/
 watchnext/.venv/

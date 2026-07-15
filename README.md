@@ -158,4 +158,4 @@ Self-contained (stdlib only, builds its own fixture DB — no live DB or network
 
 ## Notes on TV Time migration
 
-This deployment replaces TV Time, which shut down 2026-07-15. Importing prior TV Time history is on hold — Simkl (the import path) has temporarily paused free-tier imports — so history is backfilled later. Not a functional limitation of this deployment itself.
+This deployment replaces TV Time, which shut down 2026-07-15. **Prior TV Time history was migrated in on 2026-07-14** — not via Simkl (which had paused free-tier imports) but by converting the TV Time GDPR export directly into Yamtrack's native CSV importer: ~5,000 watched episodes across 172 shows, with watch dates preserved. See the "Migration context" section in `CLAUDE.md` for the full method, status-mapping rules, and the handful of episodes TMDB's numbering can't represent.
