@@ -36,16 +36,26 @@ def _add_titles(episodes):
             )
 
 
-@app.route("/")
-def watch_next():
-    error = None
-    episodes = []
+def _load_episodes():
+    """Fetch the outstanding-episode list. Returns (episodes, error_message)."""
     try:
         user_id = queries.resolve_user_id(DB_PATH, USERNAME)
         episodes = queries.get_outstanding_episodes(DB_PATH, user_id)
         _add_titles(episodes)
     except Exception as exc:  # surface config/DB problems in the page, don't 500
-        error = str(exc)
+        app.logger.exception("Could not load outstanding episodes")
+        return [], str(exc)
+    return episodes, None
+
+
+def _wants_json():
+    """True when the request came from the page's own fetch() calls."""
+    return request.headers.get("X-Requested-With") == "fetch"
+
+
+@app.route("/")
+def watch_next():
+    episodes, error = _load_episodes()
     return render_template(
         "watch_next.html",
         episodes=episodes,
@@ -59,8 +69,20 @@ def watch_next():
     )
 
 
+@app.route("/api/episodes")
+def api_episodes():
+    """JSON form of the same list the page renders. Lets the client refresh in
+    place instead of reloading, which would rebuild (and visibly repaint) every
+    poster even when nothing changed."""
+    episodes, error = _load_episodes()
+    if error:
+        return {"error": error}, 500
+    return {"episodes": episodes}
+
+
 @app.route("/mark_watched", methods=["POST"])
 def mark_watched():
+    error = None
     try:
         yamtrack_client.mark_watched(
             request.form["media_id"],
@@ -68,11 +90,23 @@ def mark_watched():
             int(request.form["episode_number"]),
             request.form["source"],
         )
-        flash("Marked watched.", "success")
     except Exception as exc:
         app.logger.exception("mark_watched failed")
-        flash(f"Couldn't mark watched: {exc}", "error")
-    # Post/Redirect/Get: re-run the query so the list reflects the change.
+        error = str(exc)
+
+    if _wants_json():
+        if error:
+            return {"ok": False, "error": error}, 502
+        # Hand back the refreshed list so the client can patch just the affected
+        # card — no reload, and the list keeps its current order.
+        episodes, load_error = _load_episodes()
+        return {"ok": True, "episodes": None if load_error else episodes}
+
+    # No-JS fallback: unchanged Post/Redirect/Get.
+    if error:
+        flash(f"Couldn't mark watched: {error}", "error")
+    else:
+        flash("Marked watched.", "success")
     return redirect(url_for("watch_next"))
 
 
