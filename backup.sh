@@ -10,7 +10,7 @@ set -euo pipefail
 # run as root on the instance (root can attach to the -wal/-shm sidecars, which
 # the ssh user cannot — they're owned by uid 1000, mode 644).
 
-ORACLE_HOST="ubuntu@yamtrack-vnic"          # stable MagicDNS name (IP is ephemeral)
+ORACLE_HOST="ubuntu@martlab"                # stable MagicDNS name (IP is ephemeral)
 ORACLE_KEY="$HOME/.ssh/oracle-yamtrack.key"
 REMOTE_DB="/home/ubuntu/yamtrack/db/db.sqlite3"
 REMOTE_SNAPSHOT="/tmp/yamtrack-backup-$$.sqlite3"
