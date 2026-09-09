@@ -23,17 +23,29 @@ if yamtrack_client.enabled() and not yamtrack_client.username:
         app.logger.exception("Could not resolve a default Yamtrack username")
 
 
-def _add_titles(episodes):
-    """Best-effort enrich each episode with a TMDB title. Only tmdb-source
-    shows are eligible; any failure leaves episode_title as None and the
-    template falls back to the SxxExx label."""
+def _add_tmdb_facts(episodes):
+    """Best-effort enrichment from TMDB: the episode title, the network the show
+    airs on, and the FINALE / SERIES FINALE upgrade to the badge the database
+    computed. Only tmdb-source shows are eligible; any failure leaves
+    episode_title and platform as None (the template falls back to the SxxExx
+    label and drops the platform line) and the badge as the database wrote it."""
     if not tmdb.enabled():
         return
     for ep in episodes:
         if ep["source"] == "tmdb":
-            ep["episode_title"] = tmdb.get_episode_title(
+            facts = tmdb.get_episode_facts(
                 ep["media_id"], ep["season_number"], ep["episode_number"]
             )
+            # The show lookup answers the platform line and the SERIES FINALE
+            # upgrade from one cached response.
+            show = tmdb.get_show_facts(ep["media_id"])
+            ep["episode_title"] = facts.title
+            ep["badge"] = queries.upgrade_badge(
+                ep["badge"],
+                facts.episode_type,
+                show.is_series_finale(ep["season_number"], ep["episode_number"]),
+            )
+            ep["platform"] = show.network
 
 
 def _load_episodes():
@@ -41,10 +53,16 @@ def _load_episodes():
     try:
         user_id = queries.resolve_user_id(DB_PATH, USERNAME)
         episodes = queries.get_outstanding_episodes(DB_PATH, user_id)
-        _add_titles(episodes)
     except Exception as exc:  # surface config/DB problems in the page, don't 500
         app.logger.exception("Could not load outstanding episodes")
         return [], str(exc)
+    try:
+        _add_tmdb_facts(episodes)
+    except Exception:
+        # Titles and the finale badge are decoration. Sharing the try above
+        # would let one bad TMDB response replace the whole list with an error
+        # banner.
+        app.logger.exception("Could not enrich episodes from TMDB")
     return episodes, None
 
 

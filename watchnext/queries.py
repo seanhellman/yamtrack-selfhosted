@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 _OUTSTANDING_EPISODES_SQL = """
-WITH in_progress_seasons AS (
+WITH open_seasons AS (
     SELECT
         s.id AS season_id,
         s.related_tv_id,
@@ -11,8 +11,19 @@ WITH in_progress_seasons AS (
         si.season_number
     FROM app_season s
     JOIN app_item si ON si.id = s.item_id
+    JOIN app_tv tv ON tv.id = s.related_tv_id
     WHERE s.user_id = :user_id
-      AND s.status = 'In progress'
+      -- Planning counts too: reload_calendar creates a newly-scheduled season
+      -- as Planning and nothing promotes it until an episode is watched, so
+      -- In progress alone hides a returning show for the whole window it
+      -- most needs to be visible. Paused/Dropped/Completed stay excluded.
+      AND s.status IN ('In progress', 'Planning')
+      -- ...but not a Planning season under a Dropped show. Dropping used to
+      -- be enough on its own, since every season of a dropped show is itself
+      -- Dropped; a season scheduled after the drop is not, and would put the
+      -- show back on the list. In progress is left alone: a season already
+      -- under way when the show was dropped behaves as it did before.
+      AND NOT (s.status = 'Planning' AND tv.status = 'Dropped')
 ),
 -- Episode-numbered Items only exist once an episode has actually been
 -- watched (created lazily by Yamtrack's own episode_save). Air-date
@@ -27,23 +38,23 @@ watched_episode_numbers AS (
 ),
 outstanding_episodes AS (
     SELECT
-        ips.season_id,
-        ips.related_tv_id,
-        ips.season_number,
+        os.season_id,
+        os.related_tv_id,
+        os.season_number,
         ev.content_number AS episode_number,
         ev.datetime AS air_datetime,
         ROW_NUMBER() OVER (
-            PARTITION BY ips.season_id
+            PARTITION BY os.season_id
             ORDER BY ev.content_number ASC
         ) AS rn,
-        COUNT(*) OVER (PARTITION BY ips.season_id) AS outstanding_count
-    FROM in_progress_seasons ips
-    JOIN events_event ev ON ev.item_id = ips.season_item_id
+        COUNT(*) OVER (PARTITION BY os.season_id) AS outstanding_count
+    FROM open_seasons os
+    JOIN events_event ev ON ev.item_id = os.season_item_id
     WHERE ev.content_number IS NOT NULL
       AND ev.datetime <= :now
       AND NOT EXISTS (
           SELECT 1 FROM watched_episode_numbers w
-          WHERE w.season_id = ips.season_id
+          WHERE w.season_id = os.season_id
             AND w.episode_number = ev.content_number
       )
 )
@@ -125,6 +136,24 @@ def resolve_username(db_path: str, username: Optional[str]) -> str:
         conn.close()
 
 
+def upgrade_badge(badge: str, episode_type: Optional[str], series_finale: bool) -> str:
+    """The badge to show once TMDB has been asked about the episode.
+    series_finale is whether it is the last episode the show will ever air."""
+    # Only NEW is upgraded, so PREMIERE wins the one-episode season where the
+    # same episode is both. Letting FINALE win there would make that card's
+    # badge depend on whether TMDB answered — with no token it reads PREMIERE.
+    # ("mid_season" exists on TMDB too, and is deliberately ignored.)
+    if badge != "NEW":
+        return badge
+    # SERIES FINALE deliberately doesn't also require episode_type == "finale":
+    # a failed season fetch would then silently cost the stronger label.
+    if series_finale:
+        return "SERIES FINALE"
+    if episode_type == "finale":
+        return "FINALE"
+    return badge
+
+
 def get_outstanding_episodes(db_path: str, user_id: int) -> list[dict]:
     conn = _connect(db_path)
     try:
@@ -151,7 +180,11 @@ def get_outstanding_episodes(db_path: str, user_id: int) -> list[dict]:
                 "episode_number": row["episode_number"],
                 "outstanding_count": row["outstanding_count"],
                 "badge": "PREMIERE" if row["episode_number"] == 1 else "NEW",
-                "episode_title": None,  # filled in by the TMDB lookup (Phase 1b)
+                # Both filled in by the TMDB lookup; nothing in the DB records
+                # either. Always present so the JSON the client patches from
+                # carries the key even when the lookup is off.
+                "episode_title": None,
+                "platform": None,
             }
         )
     return episodes

@@ -16,13 +16,10 @@
   <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32.png') }}">
   <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
   <meta name="apple-mobile-web-app-title" content="Watch Next">
-  <!-- Launch splash: a solid #212529 image (matching the page bg) per iPhone
-       resolution, so the cold launch shows dark instead of a white flash.
-       capable=yes is the legacy gate that lets iOS honor the startup image (it does
-       NOT change display mode — the OS toggle owns that). iOS is strict: it only
-       uses a startup image whose media query exactly matches the device, so each
-       resolution needs its own line. A brand-new model not listed here falls back
-       to white — add its (device-width/height, ratio) line when that happens. -->
+  <!-- Launch splash: a solid #212529 image per iPhone resolution, so the cold
+       launch shows dark instead of a white flash. capable=yes is the gate that
+       lets iOS honor it, and each resolution needs its own exact-match line.
+       → docs/adr/0007-exact-per-device-startup-images.md -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <link rel="apple-touch-startup-image" media="(device-width: 320px) and (device-height: 568px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" href="{{ url_for('static', filename='splash/splash-640x1136.png') }}">
@@ -46,12 +43,12 @@
       --muted: #9aa0a6;
       --accent: #6366f1;
       --new: #f5c518;
+      --finale: #fda4af;   /* >=4.5:1 on its own tinted pill; a darker rose fails */
       --border: rgba(255, 255, 255, 0.06);
       --ring: #7c848f;   /* >=3:1 on --card, per WCAG 1.4.11 for UI boundaries */
     }
     * { box-sizing: border-box; }
-    /* Background on the root element too: it propagates to the canvas at the
-       earliest style resolution, so there's no white frame before body paints. */
+    /* Propagates to the canvas before body paints. */
     html { background: #212529; color-scheme: dark; }
     body {
       margin: 0;
@@ -119,14 +116,27 @@
       border-radius: 8px;
       background: #12151a;
     }
+    /* Line heights here sum to ~120px against a 132px poster; that slack is what
+       keeps the text optically centred. Adding or growing a line spends it. */
     .body {
       display: flex;
       flex: 1 1 auto;
       flex-direction: column;
       justify-content: center;
       gap: 7px;
-      padding: 4px 0;
       min-width: 0;
+    }
+    /* The network is an eyebrow: it names the show's source, not the episode's. */
+    .platform {
+      color: var(--muted);          /* 5.06:1 on --card */
+      font-size: 0.64rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      line-height: 1.2;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .show {
       font-weight: 700;
@@ -138,7 +148,6 @@
       -webkit-line-clamp: 1;
       -webkit-box-orient: vertical;
     }
-    /* Episode title is the emphasized secondary line; the SxxExx code is quiet metadata. */
     .epname {
       color: #c2c7cc;
       font-size: 0.9rem;
@@ -151,13 +160,14 @@
       -webkit-box-orient: vertical;
     }
     .epcode {
-      color: #b6bbc0;                 /* brighter anchor so the code stays crisp */
+      color: #b6bbc0;                 /* brighter than the --muted tail, so the code stays crisp */
       font-size: 0.82rem;
       font-weight: 500;
       letter-spacing: 0.01em;
+      line-height: 1.2;               /* pinned: the height budget above sums these */
       font-variant-numeric: tabular-nums;
     }
-    .epcode .more {                   /* quiet tail: smaller, dimmer, lighter */
+    .epcode .more {
       margin-left: 10px;
       color: var(--muted);
       font-size: 0.74rem;
@@ -165,8 +175,9 @@
       letter-spacing: 0.02em;
       font-variant-numeric: normal;
     }
-    /* These are always in the markup so JS can patch them; collapse when unused. */
-    .epname:empty, .epcode .more:empty, .badge:empty { display: none; }
+    /* These are always in the markup so JS can patch them; collapse when unused —
+       which also collapses the flex gap, so a card with no platform is unchanged. */
+    .epname:empty, .epcode .more:empty, .platform:empty, .badge:empty { display: none; }
 
     /* ---- Badges: one family, tinted pills ---- */
     .badge {
@@ -180,15 +191,21 @@
       border-radius: 999px;
       border: 1px solid transparent;
     }
-    .badge.NEW {
+    .badge[data-badge="NEW"] {
       background: color-mix(in oklab, var(--new) 18%, transparent);
       color: var(--new);
       border-color: color-mix(in oklab, var(--new) 35%, transparent);
     }
-    .badge.PREMIERE {
+    .badge[data-badge="PREMIERE"] {
       background: color-mix(in oklab, var(--accent) 20%, transparent);
       color: #b3b7ff;
       border-color: color-mix(in oklab, var(--accent) 40%, transparent);
+    }
+    /* SERIES FINALE is the same badge said harder, so it shares this tint. */
+    .badge[data-badge="FINALE"], .badge[data-badge="SERIES FINALE"] {
+      background: color-mix(in oklab, var(--finale) 18%, transparent);
+      color: var(--finale);
+      border-color: color-mix(in oklab, var(--finale) 38%, transparent);
     }
 
     /* ---- Mark-watched affordance ---- */
@@ -218,9 +235,8 @@
       border-color: var(--accent);
       color: #fff;
     }
-    /* :hover is gated to real pointers on purpose. iOS latches :hover onto the
-       last-tapped element until you tap elsewhere, which left the button stuck
-       looking checked after marking. */
+    /* iOS latches :hover onto the last-tapped element until you tap elsewhere,
+       which left the button stuck looking checked after marking. */
     @media (hover: hover) {
       .check:hover {
         background: var(--accent);
@@ -252,7 +268,7 @@
       display: flex;
       flex-direction: column;
       gap: 8px;
-      pointer-events: none;   /* never blocks taps on the list underneath */
+      pointer-events: none;
     }
     .flash {
       display: flex;
@@ -268,9 +284,6 @@
       transition: opacity 0.3s ease, transform 0.3s ease;
     }
     .flash > span { flex: 1 1 auto; }
-    /* Only errors get an explicit close affordance: they persist, so there has to
-       be a visible way out. Success toasts auto-dismiss, and a close button on a
-       self-resolving message is just noise. */
     .flash-x {
       flex: 0 0 auto;
       width: 24px;
@@ -349,8 +362,6 @@
     <h1>Watch Next</h1>
     <p>Aired episodes you haven't watched yet</p>
   </header>
-  {# Outside <main> and fixed-position: a toast overlays the UI instead of
-     pushing the list down. #}
   <div id="toasts" aria-live="polite">
     {% for category, message in flashes %}
       <div class="flash {{ category }}">
@@ -379,19 +390,18 @@
     {% else %}
       {% for ep in episodes %}
         {# data-key lets the client patch this exact card in place after a mark or
-           refresh, instead of re-rendering the list. Sub-elements are always
-           emitted (blank when unused, hidden via :empty) so JS can just set text. #}
+           refresh, instead of re-rendering the list. #}
         <article class="card" data-key="{{ ep.media_id }}|{{ ep.season_number }}">
           {% if ep.show_image %}
-            {# Not lazy: the list is short and every poster is at or near the
-               viewport, so lazy-loading only delayed the first complete paint. #}
+            {# Not lazy: every poster is at or near the viewport. #}
             <img class="poster" src="{{ ep.show_image }}" alt="" decoding="async">
           {% endif %}
           <div class="body">
+            <div class="platform">{{ ep.platform or '' }}</div>
             <div class="show">{{ ep.show_title }}</div>
             <div class="epname">{{ ep.episode_title or '' }}</div>
             <div class="epcode"><span class="code">S{{ ep.season_number }} · E{{ ep.episode_number }}</span><span class="more">{% if ep.outstanding_count > 1 %}+{{ ep.outstanding_count - 1 }}{% endif %}</span></div>
-            <span class="badge {{ ep.badge }}">{{ ep.badge }}</span>
+            <span class="badge" data-badge="{{ ep.badge }}">{{ ep.badge }}</span>
           </div>
           {% if marking_enabled %}
             {# No onsubmit here: the script intercepts submit and posts via fetch.
@@ -454,18 +464,15 @@
     document.querySelectorAll('.flash.success').forEach(function (el) {
       setTimeout(function () { dismiss(el); }, FLASH_MS);
     });
-    // Errors stay put so they can be read; tap any toast to dismiss it early.
+    // Tap any toast to dismiss it early.
     document.addEventListener('click', function (e) {
       var t = e.target.closest ? e.target.closest('.flash') : null;
       if (t) dismiss(t);
     });
 
-    /* ---- In-place patching.
-           Reloading is what made refreshes flicker: it tears down the DOM and
-           every poster is recreated and re-decoded even when the data is
-           identical. So instead we patch only the cards that actually changed,
-           and never re-sort as a side effect of the user's own tap — the list
-           re-sorts only when the server list is rendered fresh (a real load). ---- */
+    /* ---- In-place patching. Patch only the cards that changed; reloading
+           recreates and re-decodes every poster. The list re-sorts only on a
+           real page render, never as a side effect of a tap. ---- */
     function keyOf(ep) { return ep.media_id + '|' + ep.season_number; }
 
     function cards() {
@@ -483,8 +490,10 @@
       if (code) code.textContent = 'S' + ep.season_number + ' · E' + ep.episode_number;
       var more = card.querySelector('.epcode .more');
       if (more) more.textContent = ep.outstanding_count > 1 ? '+' + (ep.outstanding_count - 1) : '';
+      var platform = card.querySelector('.platform');
+      if (platform) platform.textContent = ep.platform || '';
       var badge = card.querySelector('.badge');
-      if (badge && ep.badge) { badge.textContent = ep.badge; badge.className = 'badge ' + ep.badge; }
+      if (badge && ep.badge) { badge.textContent = ep.badge; badge.dataset.badge = ep.badge; }
       // The next tap must target the new episode, not the one just marked.
       var input = card.querySelector('input[name="episode_number"]');
       if (input) input.value = ep.episode_number;
@@ -522,7 +531,7 @@
       var btn = form.querySelector('button');
       if (!card || !btn || btn.disabled) return;
       btn.disabled = true;
-      card.classList.add('marking');   // confirm first; the row leaves after the response
+      card.classList.add('marking');
       fetch(form.action, {
         method: 'POST',
         headers: { 'X-Requested-With': 'fetch' },

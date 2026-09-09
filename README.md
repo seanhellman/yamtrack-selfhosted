@@ -1,6 +1,6 @@
 # yamtrack-selfhosted
 
-Docker Compose deployment for [Yamtrack](https://github.com/FuzzyGrim/Yamtrack), a self-hosted media tracker (movies, TV, anime, manga, games, books, comics). This repo holds only the deployment config, not the app source.
+Docker Compose deployment for [Yamtrack](https://github.com/FuzzyGrim/Yamtrack), a self-hosted media tracker (movies, TV, anime, manga, games, books, comics), built to replace TV Time. This repo holds only the deployment config, not the app source.
 
 ## Stack
 
@@ -30,9 +30,15 @@ Docker Compose deployment for [Yamtrack](https://github.com/FuzzyGrim/Yamtrack),
    Edit `.env` so the `SECRET=` line contains that value. Never commit `.env`.
 4. Start the stack:
    ```bash
-   docker compose up -d
+   docker compose up -d --wait
    ```
-5. Open http://localhost:8000 and create your account.
+   `--wait` blocks until the app is healthy, which the next step needs.
+5. Create your account. Sign-up is closed (`REGISTRATION=False` in
+   `docker-compose.yml`), so make the user directly:
+   ```bash
+   docker compose exec --user abc yamtrack python manage.py createsuperuser
+   ```
+6. Open http://localhost:8000 and log in.
 
 The SQLite database and media files persist in `./db`, bind-mounted into the container. `db/` is git-ignored — back it up as a plain folder (see below).
 
@@ -43,6 +49,7 @@ The image is pinned in `docker-compose.yml` (e.g. `ghcr.io/fuzzygrim/yamtrack:0.
 1. Check https://github.com/FuzzyGrim/Yamtrack/releases for the new version number (ghcr.io tags drop the `v` prefix, e.g. release `v0.25.3` → image tag `0.25.3`).
 2. Update the tag in `docker-compose.yml`.
 3. `docker compose up -d` to pull and recreate the container.
+4. Run the Watch Next query tests — see [Tests](#tests). Yamtrack's schema is what that app reads, so a bump can silently change its results.
 
 ## Backup / restore
 
@@ -52,9 +59,9 @@ The image is pinned in `docker-compose.yml` (e.g. `ghcr.io/fuzzygrim/yamtrack:0.
 ./backup.sh
 ```
 
-Takes a **transactionally consistent** snapshot of the live DB over SSH/Tailscale and drops a timestamped archive in `~/yamtrack-backups/`, verified with `PRAGMA integrity_check`. The app can stay running.
+Takes a **transactionally consistent** snapshot of the live DB over SSH/Tailscale and drops a timestamped archive in `~/yamtrack-backups/`, verified with `PRAGMA integrity_check`. The app can stay running. The DB is WAL-mode, so this uses SQLite's online backup API rather than copying the file — a plain `scp` would silently miss transactions still sitting in the `-wal` sidecar.
 
-The DB is WAL-mode, so this deliberately does *not* just `scp db.sqlite3` — recent transactions can still live in the `-wal` sidecar, and a plain copy would silently miss them (or tear the file mid-checkpoint). Instead it uses SQLite's online backup API on the instance (run as root, which can read through the WAL) to produce a clean single-file copy. Runs are currently manual; automating them is a planned follow-up (see CLAUDE.md deployment phases).
+Runs are manual; scheduling them is not built yet.
 
 ### Restore
 
@@ -70,24 +77,27 @@ The DB is WAL-mode, so this deliberately does *not* just `scp db.sqlite3` — re
 
 ## Deploying on Oracle Cloud's Always Free tier
 
-Both `ghcr.io/fuzzygrim/yamtrack` and `redis:8-alpine` publish multi-arch images (amd64 + arm64), so this compose file runs unmodified on Oracle's free ARM shape — confirmed via `docker manifest inspect`, no changes needed for the architecture.
+Both `ghcr.io/fuzzygrim/yamtrack` and `redis:8-alpine` publish multi-arch images (amd64 + arm64), so this compose file runs unmodified on Oracle's free ARM shape.
 
 1. Sign up at https://www.oracle.com/cloud/free/ (requires a card for identity verification only — a refunded $1 hold, not a charge). Pick a home region with reliable ARM capacity, e.g. `us-ashburn-1` or `us-phoenix-1`; this can't be changed later.
 2. **Set up a Budget Alert** (Billing → Budgets) for a small threshold, e.g. $0.01, before provisioning anything. An email tripwire that fires on any actual or forecasted spend, so a mistake surfaces immediately instead of on a bill.
 3. Convert the account to Pay-As-You-Go billing. You're still charged nothing as long as usage stays within Always Free limits, but this step is required — it exempts the instance from Oracle's idle-instance reclamation policy, which a low-traffic personal app would otherwise likely trigger.
-4. Create a compute instance:
-   - Shape `VM.Standard.A1.Flex`, sliders set to 2 OCPU / 12 GB (the full Always Free allocation) — the console flags this "Always Free-eligible" when configured correctly.
-   - Image: the **aarch64-suffixed** Ubuntu build (e.g. "Canonical Ubuntu 24.04 Minimal aarch64"). The non-suffixed image is amd64 and will be rejected as incompatible with this ARM shape.
-   - If creation fails with "Out of host capacity," retry, try a different availability domain, or wait — a one-time provisioning hiccup, not an ongoing problem once the instance exists.
-   - The "View estimated cost" button may show a non-zero figure (commonly the boot volume, priced at list rate) — a known display quirk, not a real charge, as long as your config stays within the Always Free shape/storage limits above.
-   - If the "Automatically assign public IPv4 address" toggle is stuck disabled even with a public subnet selected, create the instance anyway, then attach an ephemeral public IP afterward via Instance → Networking → VNIC → IP Addresses → Edit → Public IP Type → Ephemeral Public IP.
+4. Create a compute instance: shape `VM.Standard.A1.Flex` at 2 OCPU / 12 GB (the full Always Free allocation), running the **aarch64-suffixed** Ubuntu image. The console's create-instance flow has several traps here, from the non-obvious location of the shape sliders to a misleading cost estimate — [ADR-0002](docs/adr/0002-oracle-always-free-over-owned-hardware.md) lists each one and its workaround.
 5. Install Docker and Docker Compose on the instance.
 6. Install Tailscale on the instance and join it to your tailnet.
-7. Copy `docker-compose.yml` to the instance, and recreate `.env` there directly (don't transfer the file over an insecure channel).
-8. `docker compose up -d`, then reach the app at `http://<tailscale-hostname>:8000` (Tailscale's MagicDNS gives you a memorable hostname automatically — no need to remember an IP).
-9. Once Tailscale access is confirmed working, close public exposure: delete the default security list's SSH (port 22) ingress rule from `0.0.0.0/0`. **Do not detach the instance's public IP itself to do this** — OCI's public-subnet networking model requires the instance to hold a public IP for outbound internet access too (no default NAT like AWS), so removing it kills outbound connectivity entirely, including Tailscale's own connection to its coordination servers. Closing the security list rule achieves the same goal (no public inbound access) without that side effect, since Tailscale traffic doesn't traverse the normal VCN ingress path anyway.
+7. Clone this repo onto the instance — `docker-compose.yml` alone is not enough, since `build: ./watchnext` needs the whole `watchnext/` directory. Recreate `.env` there directly (don't transfer the file over an insecure channel).
+8. On the instance, `docker compose up -d --wait`, then create your account with the `createsuperuser` command from [Setup](#setup). Reach the app at `http://<tailscale-hostname>:8000` (Tailscale's MagicDNS gives you a memorable hostname automatically — no need to remember an IP).
+9. Once Tailscale access is confirmed working, close public exposure: delete the default security list's SSH (port 22) ingress rule from `0.0.0.0/0`. **Do not detach the instance's public IP to do this** — it is also the outbound path (OCI has no default NAT), so removing it kills outbound connectivity entirely, Tailscale included. Deleting the ingress rule closes public access without that side effect.
 
 To migrate existing data rather than starting fresh, stop the stack on the old host, copy the `db/` directory over instead of skipping it, then start the stack on the new host — the same tar-based approach as [Backup / restore](#backup--restore) works for moving between hosts.
+
+### Updating the instance
+
+```bash
+./deploy.sh
+```
+
+Pulls on the instance, runs the Watch Next tests there, rebuilds, restarts, and waits for the app to answer before reporting success — then prints the deployed commit, so `git log -1` on the instance answers "is it running what merged?". It refuses to run over unpushed local commits or a hand-edited instance checkout, and rolls the checkout back if a test fails.
 
 ### Access from other devices
 
@@ -97,11 +107,17 @@ Install Tailscale on any device you want access from (Mac, iPhone, etc.) and sig
 
 Yamtrack's Home page lists shows that are *in progress*, but doesn't surface a plain "here are the aired episodes you haven't watched yet" list (the thing TV Time did well). `watchnext/` is a small, self-contained companion app that fills that gap — a separate container in this same compose stack, not a fork or modification of Yamtrack.
 
-- **Reads the DB directly; never writes it.** It opens Yamtrack's own SQLite DB and runs `SELECT`s only. Because Yamtrack's DB is in WAL mode, the container mounts `./db` read/write (a WAL reader must be able to update the `-shm`/`-wal` sidecars) and runs as uid/gid `1000` (the DB files' owner), but write protection is enforced at the SQLite engine level via `PRAGMA query_only = ON` — any write is rejected with `SQLITE_READONLY`. The one write action (mark-watched, below) does *not* touch the DB — it goes through Yamtrack's own HTTP endpoint — so this read-only-DB invariant holds even with marking enabled.
-- **What it shows:** for each in-progress season, the earliest aired episode you haven't watched, with a `+N` count of how many more are backed up behind it, sorted soonest-aired-first, badged `PREMIERE` (season openers) or `NEW`.
-- **Episode titles (optional):** with a TMDB API token configured (see below), each row also shows the episode's real title (e.g. `S05E01 · First Light`). Without a token it degrades gracefully to number-only labels.
-- **Mark as watched (optional):** with Yamtrack credentials configured (see below), each card gets a checkmark that marks that episode watched and drops it off the list.
+- **What it shows:** for each in-progress season, the earliest aired episode you haven't watched, with a `+N` count of how many more are backed up behind it, sorted soonest-aired-first, badged `PREMIERE` (season openers), `FINALE` / `SERIES FINALE` (season closers) or `NEW`.
 - **Access:** served on port `8090`, reached over Tailscale exactly like Yamtrack itself — e.g. `http://<tailscale-hostname>:8090`. No new public exposure.
+- **Episode titles and finale badges (optional):** with a TMDB API token configured (see below), each row also shows the episode's real title (e.g. `S05E01 · First Light`), and a season's last episode is badged `FINALE` — `SERIES FINALE` on the last episode a show that has ended will ever air. Without a token it degrades gracefully to number-only labels and a `NEW` badge.
+- **Mark as watched (optional):** with Yamtrack credentials configured (see below), each card gets a checkmark that marks that episode watched and drops it off the list.
+- **Reads the DB directly; never writes it.** Writes are rejected by SQLite itself, and the mark-watched action goes through Yamtrack's own HTTP endpoint rather than the database — so the read-only invariant holds even with marking enabled. → [ADR-0004](docs/adr/0004-read-write-mount-with-query-only.md)
+
+It's built and started as part of the normal `docker compose up -d`. To (re)build and start just this service:
+
+```bash
+docker compose up -d --build watchnext
+```
 
 ### Episode titles via TMDB (optional)
 
@@ -113,26 +129,19 @@ Yamtrack only stores full per-episode metadata (including the title) once an epi
   cp watchnext/.env.example watchnext/.env   # then edit TMDB_API=...
   ```
   This file is git-ignored. The compose service loads it via `env_file` (marked optional — the app runs fine without it).
-- Lookups are best-effort and cached in-process: any failure (no token, network error, rate limit, 404) falls back to the `SxxExx` label and never breaks the page. Only `tmdb`-source shows are looked up.
+- Lookups are best-effort: any failure (no token, network error, rate limit, 404) falls back to the `SxxExx` label and never breaks the page. Only `tmdb`-source shows are looked up.
 - **Attribution:** per TMDB's terms, when a token is configured the page footer shows the TMDB logo (`watchnext/static/tmdb.svg`) and the required notice. This product uses the TMDB API but is not endorsed or certified by TMDB.
 
 ### Mark as watched (optional)
 
-Set `YAMTRACK_PASSWORD` in `watchnext/.env` to enable a checkmark on each card. Clicking it marks that episode watched, then the list re-renders (the episode drops off, or the next outstanding one for that show takes its place).
+Set `YAMTRACK_PASSWORD` in `watchnext/.env` to enable a checkmark on each card. Clicking it marks that episode watched, then the list re-renders (the episode drops off, or the next outstanding one for that show takes its place). It posts to the same endpoint Yamtrack's own UI uses, so Yamtrack's status cascade — episode → season → show auto-completion — runs normally. → [ADR-0005](docs/adr/0005-mark-watched-via-episode-save.md)
 
-- **How it works:** the app logs in as you (Yamtrack's own allauth session + CSRF) and POSTs to Yamtrack's own `episode_save` endpoint — the same path Yamtrack's UI uses. This deliberately does **not** write the SQLite DB directly: creating a watch record triggers Yamtrack's model-level status cascade (episode → season → show auto-completion), which must not be reimplemented. So the DB connection stays strictly read-only (`query_only`); the only write is this HTTP call.
 - **Config** (all in the git-ignored `watchnext/.env`):
   - `YAMTRACK_PASSWORD` — your Yamtrack password. Required to show the checkmark; if unset, the feature is simply hidden.
   - `YAMTRACK_USERNAME` — optional; defaults to the sole user in the DB.
   - `YAMTRACK_URL` — optional; defaults to `http://yamtrack:8000` (the compose service name).
-- **Credential note:** this stores your Yamtrack password on the instance (git-ignored, Tailscale-only, single-user). The bounded risk is acceptable because the app already has filesystem access to the same DB; the main caveat is not to reuse that password elsewhere.
+- **Don't reuse that password elsewhere.** Enabling this stores it on the instance — git-ignored and Tailscale-only, but stored.
 - **Resilience:** the session is reused across marks and silently re-established if it expires; any failure (bad credentials, Yamtrack unreachable) surfaces as an error banner and never crashes the page.
-
-It's built and started as part of the normal `docker compose up -d`. To (re)build and start just this service:
-
-```bash
-docker compose up -d --build watchnext
-```
 
 ### Local development
 
@@ -146,16 +155,21 @@ WATCHNEXT_DB_PATH=/path/to/a/copy/of/db.sqlite3 \
   waitress-serve --host=127.0.0.1 --port=8090 app:app
 ```
 
-Then open http://localhost:8090. Point `WATCHNEXT_DB_PATH` at a *copy* of the DB (e.g. one produced by `./backup.sh`) rather than a live production file. `WATCHNEXT_USERNAME` can be set to pick a specific Yamtrack user; if unset, it uses the single user in the DB (the expected case here). Set `TMDB_API` to also exercise episode-title lookups locally. To exercise mark-watched safely, point `YAMTRACK_URL` at a throwaway Yamtrack running against a *copy* of the DB rather than your live instance.
+Then open http://localhost:8090. Point `WATCHNEXT_DB_PATH` at a *copy* of the DB (e.g. one produced by `./backup.sh`) rather than a live production file. `WATCHNEXT_USERNAME` picks a specific Yamtrack user; if unset, it uses the single user in the DB. Set `TMDB_API` to also exercise episode-title lookups locally. To exercise mark-watched safely, point `YAMTRACK_URL` at a throwaway Yamtrack running against a *copy* of the DB rather than your live instance.
 
 ### Tests
 
 ```bash
 python3 watchnext/tests/test_queries.py
+python3 watchnext/tests/test_tmdb.py
 ```
 
-Self-contained (stdlib only, builds its own fixture DB — no live DB or network). It asserts the outstanding-episodes query's edge cases (gap handling, aired/status filters, badges, ordering, multi-season, empty). **Run it after bumping the pinned Yamtrack image** — it's the cheapest way to catch the query silently drifting if Yamtrack's DB schema changed.
+Self-contained (stdlib only, builds its own fixture DB, stubs the network — no live DB, no venv). `test_queries.py` asserts the outstanding-episodes query's edge cases (gap handling, aired/status filters, badges, ordering, multi-season, empty). `test_tmdb.py` asserts the TMDB lookup — titles, the finale flag, and the fallback to a plain `SxxExx` label and an unchanged badge whenever TMDB is missing, slow, or failing.
 
-## Notes on TV Time migration
+## What it doesn't do
 
-This deployment replaces TV Time, which shut down 2026-07-15. **Prior TV Time history was migrated in on 2026-07-14** — not via Simkl (which had paused free-tier imports) but by converting the TV Time GDPR export directly into Yamtrack's native CSV importer: ~5,000 watched episodes across 172 shows, with watch dates preserved. See the "Migration context" section in `CLAUDE.md` for the full method, status-mapping rules, and the handful of episodes TMDB's numbering can't represent.
+- **Watch Next lists TV only.** Yamtrack tracks movies, anime, manga, games, books, and comics too; the companion app's query covers TV seasons and episodes, and ignores the rest.
+- **No calendar or iCal feed** of upcoming release dates.
+- **No notifications** of any kind.
+- **No public exposure, and no support for adding it.** There is no reverse proxy, TLS, or certificate setup here — access is over Tailscale. Putting a proxy in front requires setting `URLS` in `.env`, or CSRF and OAuth fail with 403s.
+- **Single-user by default.** Watch Next resolves the sole Yamtrack user automatically; with more than one, `WATCHNEXT_USERNAME` has to name the target.

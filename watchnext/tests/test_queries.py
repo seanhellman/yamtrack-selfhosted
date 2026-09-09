@@ -16,7 +16,9 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import queries
+from harness import check, guard, summary
 
 now = datetime.now(timezone.utc)
 def ago(days): return (now - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
@@ -84,8 +86,16 @@ def build(path):
     # Premiere badge on E1.
     f.show("prem", "Premiere", "In progress", {1: ("In progress", [(1, ago(3), False)])})
     # Status filter: none of these appear despite aired-unwatched episodes.
-    for st in ("Paused", "Planning", "Dropped", "Completed"):
+    for st in ("Paused", "Dropped", "Completed"):
         f.show(st.lower(), st, st, {1: (st, [(1, ago(3), False)])})
+    # A newly-scheduled season of a show still being watched.
+    f.show("planning", "Planning", "In progress", {4: ("Planning", [
+        (1, ago(19), False), (2, ago(12), False), (3, ago(5), False),
+        (4, ahead(2), False)])})
+    # A show added to the watchlist and never started.
+    f.show("unstarted", "Unstarted", "Planning", {1: ("Planning", [(1, ago(3), False)])})
+    # A season scheduled after the show was dropped.
+    f.show("redropped", "Redropped", "Dropped", {2: ("Planning", [(1, ago(3), False)])})
     # Ordering: earlier-airing next episode sorts first.
     f.show("late", "Late", "In progress", {1: ("In progress", [(1, ago(1), False)])})
     f.show("early", "Early", "In progress", {1: ("In progress", [(1, ago(9), False)])})
@@ -95,13 +105,6 @@ def build(path):
         2: ("In progress", [(1, ago(3), False)])})
     db.close()
     return f.uid
-
-
-passes = fails = 0
-def check(label, cond, detail=""):
-    global passes, fails
-    passes, fails = passes + bool(cond), fails + (not cond)
-    print(f"  [{'PASS' if cond else 'FAIL'}] {label}{(' — ' + detail) if detail else ''}")
 
 
 def main():
@@ -120,8 +123,14 @@ def main():
         check("aired filter: only E1 (future E2 excluded)",
               fut and fut["episode_number"] == 1 and fut["outstanding_count"] == 1)
         check("premiere: E1 badged PREMIERE", by.get("Premiere", {}).get("badge") == "PREMIERE")
-        for st in ("Paused", "Planning", "Dropped", "Completed"):
+        for st in ("Paused", "Dropped", "Completed"):
             check(f"status filter: {st} excluded", st not in by)
+        pl = by.get("Planning")
+        check("status filter: Planning season included", pl is not None)
+        check("planning: earliest aired episode is E1", pl and pl["episode_number"] == 1)
+        check("planning: +N counts only aired E1-E3", pl and pl["outstanding_count"] == 3)
+        check("planning: never-started show included", "Unstarted" in by)
+        check("planning: season under a Dropped show excluded", "Redropped" not in by)
         if "Early" in titles and "Late" in titles:
             check("ordering: earlier-airing sorts first", titles.index("Early") < titles.index("Late"))
         else:
@@ -130,8 +139,27 @@ def main():
         check("empty: no outstanding in an empty DB returns []",
               _empty_returns_empty())
 
-    print(f"\n==== {passes} passed, {fails} failed ====")
-    return 1 if fails else 0
+
+def badge_upgrades():
+    """The badge a card ends up with once TMDB's episode_type is known."""
+    cases = [
+        (("NEW", "finale", False), "FINALE"),
+        (("NEW", "finale", True), "SERIES FINALE"),
+        # The show response names the final episode on its own, so the stronger
+        # badge stands even when the season fetch never said "finale".
+        (("NEW", None, True), "SERIES FINALE"),
+        (("NEW", "standard", True), "SERIES FINALE"),
+        (("NEW", "standard", False), "NEW"),
+        (("NEW", "mid_season", False), "NEW"),  # exists on TMDB; deliberately ignored
+        (("NEW", None, False), "NEW"),          # no token: nothing is known
+        (("PREMIERE", "finale", True), "PREMIERE"),  # one-episode season: premiere wins
+        (("PREMIERE", None, True), "PREMIERE"),
+        (("PREMIERE", "standard", False), "PREMIERE"),
+    ]
+    for (badge, episode_type, series_finale), want in cases:
+        got = queries.upgrade_badge(badge, episode_type, series_finale)
+        check(f"badge: {badge} + {episode_type!r} + series_finale={series_finale} -> {want}",
+              got == want, got)
 
 
 def _empty_returns_empty():
@@ -145,4 +173,6 @@ def _empty_returns_empty():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    guard("main", main)
+    guard("badge_upgrades", badge_upgrades)
+    sys.exit(summary())

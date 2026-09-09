@@ -9,6 +9,9 @@ services:
     environment:
       - TZ=America/Los_Angeles
       - REDIS_URL=redis://redis:6379
+      # Sign-up is never opened — accounts come from `manage.py createsuperuser`.
+      # See docs/adr/0014-registration-closed-in-compose.md.
+      - REGISTRATION=False
     volumes:
       - ./db:/yamtrack/db
     ports:

@@ -75,6 +75,11 @@ def _login(session):
 
 
 def _post_episode_save(session, payload):
+    # The bare token is enough here: over plain HTTP with no Origin header,
+    # Django does token-only CSRF checking rather than comparing origins.
+    # Putting TLS in front of Yamtrack moves this under Django's Referer
+    # check, which the Referer below satisfies only while YAMTRACK_URL is the
+    # same origin being served — otherwise it needs CSRF_TRUSTED_ORIGINS.
     return session.post(
         f"{BASE_URL}/episode_save",
         data=payload,
