@@ -162,6 +162,32 @@ def badge_upgrades():
               got == want, got)
 
 
+def mark_verification():
+    """Reading a mark back out of the list, which is what stops a save that
+    silently did nothing from being reported as success."""
+    # One row per open season, each holding that season's next outstanding
+    # episode — the shape get_outstanding_episodes returns.
+    listed = [
+        {"media_id": 97546, "season_number": 4, "episode_number": 4},
+        {"media_id": 1396, "season_number": 1, "episode_number": 2},
+    ]
+    cases = [
+        # The mark didn't take: the same episode is still the season's next one.
+        ((97546, 4, 4), True, "unchanged row means the save was lost"),
+        # It took: the row advanced to the following episode.
+        ((97546, 4, 5), False, "advanced row means the save landed"),
+        # It took and emptied the season, so the row is gone.
+        ((99999, 1, 1), False, "a season that left the list is caught up"),
+        # A different season of the same show must not answer for this one.
+        ((97546, 3, 4), False, "another season of the same show is ignored"),
+        # media_id arrives from the form as a string and from SQLite as an int.
+        (("97546", 4, 4), True, "media_id compares across str and int"),
+    ]
+    for (media_id, season, episode), want, why in cases:
+        got = queries.still_outstanding(listed, media_id, season, episode)
+        check(f"verify: {why}", got == want, f"got {got}")
+
+
 def _empty_returns_empty():
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "empty.sqlite3")
@@ -175,4 +201,5 @@ def _empty_returns_empty():
 if __name__ == "__main__":
     guard("main", main)
     guard("badge_upgrades", badge_upgrades)
+    guard("mark_verification", mark_verification)
     sys.exit(summary())

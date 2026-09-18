@@ -154,6 +154,20 @@ def upgrade_badge(badge: str, episode_type: Optional[str], series_finale: bool) 
     return badge
 
 
+def still_outstanding(episodes: list[dict], media_id, season_number: int,
+                      episode_number: int) -> bool:
+    """Whether an episode just marked watched is still in the outstanding list.
+
+    The list holds one row per open season, carrying that season's next
+    outstanding episode, so a mark that landed either advances that number or
+    drops the row.
+    """
+    for ep in episodes:
+        if str(ep["media_id"]) == str(media_id) and ep["season_number"] == season_number:
+            return ep["episode_number"] == episode_number
+    return False
+
+
 def get_outstanding_episodes(db_path: str, user_id: int) -> list[dict]:
     conn = _connect(db_path)
     try:

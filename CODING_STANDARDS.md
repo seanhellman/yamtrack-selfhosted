@@ -35,6 +35,7 @@ Conventions for writing code in this repo. Each rule carries the shortest reason
 - **That re-fetching is the episode lookup's alone.** A show's own facts — its network, its status, the episode that aired last — are answered once and never re-checked. The network can't grow underneath us the way a mid-run season's episode list does; `status` can, and is cached anyway — a show that ends mid-process reads `FINALE` until the next restart, which is what no token at all does too. → [ADR-0012](docs/adr/0012-network-not-watch-providers.md)
 - **`SERIES FINALE` compares against `last_episode_to_air`, never against a season count.** Rebuilding it as arithmetic over `number_of_seasons` reintroduces a dependency on the season response, which can only withhold the badge. Unlike `FINALE` it deliberately doesn't also require `episode_type`.
 - **Database access is SELECT-only, under `PRAGMA query_only = ON`.** Writes go over HTTP to Yamtrack's own endpoints. See [ADR-0004](docs/adr/0004-read-write-mount-with-query-only.md) and [ADR-0005](docs/adr/0005-mark-watched-via-episode-save.md).
+- **A mark is not reported watched until the query says the episode left the list.** `episode_save` answers 200 on a redirect to the login page, so the HTTP response alone can't tell a save from a bounce — an expired session once reported success for a week of marks that saved nothing. `_unconfirmed()` re-queries and fails the request when the episode is still outstanding; deleting it as a redundant read restores a silent failure.
 
 ## `docker-compose.yml`
 

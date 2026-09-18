@@ -1,3 +1,4 @@
+import logging
 import os
 
 from flask import Flask, flash, get_flashed_messages, redirect, render_template, request, url_for
@@ -5,6 +6,11 @@ from flask import Flask, flash, get_flashed_messages, redirect, render_template,
 import queries
 import tmdb
 import yamtrack_client
+
+# waitress-serve imports this module before it configures logging, so this call
+# wins; without it the root logger stays at WARNING and nothing below an
+# exception is emitted.
+logging.basicConfig(level=logging.INFO)
 
 DB_PATH = os.environ.get("WATCHNEXT_DB_PATH", "/yamtrack/db/db.sqlite3")
 USERNAME = os.environ.get("WATCHNEXT_USERNAME") or None
@@ -71,6 +77,30 @@ def _wants_json():
     return request.headers.get("X-Requested-With") == "fetch"
 
 
+def _unconfirmed(media_id, season_number, episode_number):
+    """Why the mark can't be called done, or None once the list confirms it.
+
+    Deliberately a bare query rather than _load_episodes: confirming needs the
+    episode numbers, not the TMDB titles, and the no-JS path would otherwise pay
+    for an enrichment it throws away before redirecting.
+    """
+    try:
+        user_id = queries.resolve_user_id(DB_PATH, USERNAME)
+        outstanding = queries.get_outstanding_episodes(DB_PATH, user_id)
+    except Exception as exc:
+        app.logger.exception("Could not confirm the mark landed")
+        return f"couldn't confirm it saved ({exc})"
+    if queries.still_outstanding(outstanding, media_id, season_number, episode_number):
+        app.logger.error(
+            "mark_watched did not take: media %s S%sE%s still outstanding",
+            media_id,
+            season_number,
+            episode_number,
+        )
+        return "Yamtrack accepted the request but the episode is still unwatched"
+    return None
+
+
 @app.route("/")
 def watch_next():
     episodes, error = _load_episodes()
@@ -102,15 +132,24 @@ def api_episodes():
 def mark_watched():
     error = None
     try:
+        # Parsed in here so malformed form data takes the same reported path as
+        # a failed save rather than surfacing as a 400/500 with no log line.
+        media_id = request.form["media_id"]
+        season_number = int(request.form["season_number"])
+        episode_number = int(request.form["episode_number"])
         yamtrack_client.mark_watched(
-            request.form["media_id"],
-            int(request.form["season_number"]),
-            int(request.form["episode_number"]),
-            request.form["source"],
+            media_id, season_number, episode_number, request.form["source"]
         )
     except Exception as exc:
         app.logger.exception("mark_watched failed")
-        error = str(exc)
+        # Falls back to the class name because an empty message would be falsy,
+        # and every test below reads a falsy error as "it worked".
+        error = str(exc) or type(exc).__name__
+
+    # episode_save answers 200 even when it saved nothing, so the list has the
+    # final say. → CODING_STANDARDS.md
+    if not error:
+        error = _unconfirmed(media_id, season_number, episode_number)
 
     if _wants_json():
         if error:

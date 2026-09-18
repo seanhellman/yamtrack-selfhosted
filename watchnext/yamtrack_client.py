@@ -17,6 +17,7 @@ import os
 import re
 import threading
 from datetime import datetime
+from urllib.parse import urlsplit
 
 import requests
 
@@ -92,7 +93,9 @@ def _post_episode_save(session, payload):
 
 
 def _on_login_page(resp) -> bool:
-    return resp.url.rstrip("/").endswith("/accounts/login")
+    # Path only: Django bounces an expired session to
+    # /accounts/login/?next=/episode_save, which a match on the whole URL misses.
+    return urlsplit(resp.url).path.rstrip("/").endswith("/accounts/login")
 
 
 def _auth_failed(resp) -> bool:
