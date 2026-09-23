@@ -28,11 +28,11 @@ Oracle Cloud "Always Free" ARM VM, live since 2026-07-07, reached exclusively vi
 
 - **`.env` exists only on the instance**, regenerated there directly and never transferred from the Mac. Holds `SECRET` and nothing else.
 - **The live DB exists only on the instance**, at `~/yamtrack/db/db.sqlite3`. `db/` is absent on the Mac; Compose would recreate it as an empty bind mount if the stack were ever run here.
-- **`backup.sh` runs on the Mac** and pulls a WAL-consistent, integrity-checked snapshot to `~/yamtrack-backups/`. It uses SQLite's online backup API over SSH rather than copying the file — a plain `scp db.sqlite3` would silently miss uncheckpointed `-wal` data. Still manual → [wip#10](https://github.com/seanhellman/yamtrack-selfhosted-wip/issues/10).
+- **`backup.sh` runs on the Mac** and pulls a WAL-consistent, integrity-checked snapshot to `~/yamtrack-backups/`. It uses SQLite's online backup API over SSH rather than copying the file — a plain `scp db.sqlite3` would silently miss uncheckpointed `-wal` data. Still manual → [#1](https://github.com/seanhellman/yamtrack-selfhosted/issues/1).
 
 ## How code reaches the instance
 
-- **`~/yamtrack` is a git checkout of the `wip` repo**, pulled over SSH with a read-only deploy key generated on the instance. Tracking `wip` rather than the public `github` keeps deploying decoupled from publishing; `git remote set-url` moves it across when the private repo retires.
+- **`~/yamtrack` is an HTTPS clone of the public repo** — no key, since the repo is public. Whatever merges to `main` is what the next deploy ships.
 - **`deploy.sh` runs on the Mac** and does the whole refresh over SSH: abort on a dirty tree → pull → run `watchnext/tests/` on the instance → rebuild → `up -d` → print the deployed commit. Its comments carry the rest, including why it cannot run on the instance and the one command that must never be run there.
 
 ## Watch Next companion app (`watchnext/`)
@@ -65,6 +65,6 @@ A small Flask app that reads Yamtrack's SQLite DB to render a TV Time-style list
 
 ## Agent skills
 
-- **Issue tracker:** GitHub Issues on the private `seanhellman/yamtrack-selfhosted-wip` repo — never the public one; always pass `--repo`. It is the only tracker: planned work, declined features, and completed history all live there rather than in this file. See `docs/agents/issue-tracker.md`.
+- **Issue tracker:** GitHub Issues on `seanhellman/yamtrack-selfhosted`; always pass `--repo`. It is the only tracker: planned work, declined features, and completed history all live there rather than in this file. See `docs/agents/issue-tracker.md`.
 - **Triage labels:** the five canonical roles, unchanged. See `docs/agents/triage-labels.md`.
 - **Domain docs:** single-context, root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.

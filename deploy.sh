@@ -31,12 +31,12 @@ COMPOSE="sudo docker compose"
 # loaded ssh-agent offering other keys first and tripping sshd's auth-attempt cap.
 remote() { ssh -o BatchMode=yes -o IdentitiesOnly=yes -i "$ORACLE_KEY" "$ORACLE_HOST" "cd $REMOTE_DIR && $1"; }
 
-# 1) The instance pulls `main` from `wip`, so a commit sitting unpushed on the
+# 1) The instance pulls `main` from `github`, so a commit sitting unpushed on the
 #    Mac cannot reach it — and the resulting no-op deploy is indistinguishable
 #    from a real one unless you read the printed sha.
-git fetch wip main --quiet
-if [ -n "$(git rev-list wip/main..main)" ]; then
-  echo "Error: local main has commits not pushed to wip." >&2
+git fetch github main --quiet
+if [ -n "$(git rev-list github/main..main)" ]; then
+  echo "Error: local main has commits not pushed to github." >&2
   echo "Deploying now would ship the previous commit and report success." >&2
   exit 1
 fi

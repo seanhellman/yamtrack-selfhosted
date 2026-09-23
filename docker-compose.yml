@@ -1,7 +1,7 @@
 services:
   yamtrack:
     container_name: yamtrack
-    image: ghcr.io/fuzzygrim/yamtrack:0.25.3
+    image: ghcr.io/fuzzygrim/yamtrack:0.26.3
     restart: unless-stopped
     depends_on:
       - redis
